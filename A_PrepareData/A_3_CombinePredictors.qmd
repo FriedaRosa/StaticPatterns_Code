@@ -1,0 +1,139 @@
+---
+title: "Predictor Variables Calculations 3"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+```{r}
+source("../src/A_config.R")
+```
+
+```{r}
+predictors <- list.files(paste0(out_path, "Predictors/"))
+
+pred_list <- sapply(paste0(paste0(out_path, "Predictors/"), predictors), readRDS)
+TaxBL <- read.csv("../../Data/csv/A_3d_full_BirdLife2018_TaxonomicLookup.csv") %>% select(-X) %>% rename("verbatim_name" = "AtlasSp")
+names(pred_list) <- gsub(pattern= ".rds", "", predictors)
+```
+
+
+
+
+```{r}
+# Adjust column names for merging:
+pred_list[["A_3f_AVONET"]]  <- pred_list[["A_3f_AVONET"]] %>% 
+  rename("verbatim_name" = "AtlasSp") %>% 
+  distinct(verbatim_name, .keep_all =T)
+
+pred_list[["A_3e_RedListCat_IUCN2024"]]  <- pred_list[["A_3e_RedListCat_IUCN2024"]] %>% 
+  rename("verbatim_name" = "AtlasSp") %>% 
+  distinct(verbatim_name, .keep_all =T)
+
+pred_list[["A_3d_BirdLife2018_Predictors"]] <- pred_list[["A_3d_BirdLife2018_Predictors"]] %>% 
+  distinct(verbatim_name, .keep_all =T)
+
+pred_list[["A_3c_Geometries"]]$tp <- as.factor(pred_list[["A_3c_Geometries"]]$tp)
+
+
+
+# Merge together
+BigTab_all <- pred_list[["A_02_BigTable"]] %>% 
+  filter(cell_grouping == 1) %>% 
+  left_join(pred_list[["A_3d_BirdLife2018_Predictors"]]) %>% 
+  distinct(dataset, tp, verbatim_name, .keep_all=T) %>% 
+  left_join(pred_list[["A_3a_Co_Occ_df_final"]])%>% 
+  distinct(dataset, tp, verbatim_name, .keep_all=T) %>%
+  left_join(pred_list[["A_3a_GammaAlphaBeta_Species"]])%>% 
+  distinct(dataset, tp, verbatim_name, .keep_all=T) %>% 
+  left_join(pred_list[["A_3c_Geometries"]])%>% 
+  distinct(dataset, tp, verbatim_name, .keep_all=T) %>%
+  left_join(pred_list[["A_3b_SAC_Data_Df"]] %>% 
+              dplyr::select(-mean_area))%>% 
+  distinct(dataset, tp, verbatim_name, .keep_all=T) %>%
+  left_join(pred_list[["A_3e_RedListCat_IUCN2024"]])%>% 
+  distinct(dataset, tp, verbatim_name, .keep_all=T) %>%
+  left_join(pred_list[["A_3f_AVONET"]]) %>% 
+  distinct(dataset, tp, verbatim_name, .keep_all=T) %>%
+  left_join(TaxBL)
+
+
+BigTab_all %>% group_by(dataset, tp) %>% 
+  summarise(across(everything(), ~ sum(is.na(.x))))
+
+BigTab_all %>% distinct(verbatim_name) %>% nrow()
+
+```
+
+## Phylogenetic distinctness // Fair proportion metric
+```{r}
+library(ape); library(geiger); library(phyloregion)
+BL_crosswalk <- readxl::read_excel("c:/Users/wolke/OneDrive - CZU v Praze/Dokumenty/PhD_Projects/StaticPredictors/Data/BL_taxonomy_crosswalk.xlsx", sheet = 1, col_names = T) %>% select(1,41)
+
+ 
+# BL_crosswalk <- readxl::read_excel(paste0(source_predictors, 
+#                                           "BL_taxonomy_crosswalk.xlsx", 
+#                                           sheet = 1, 
+#                                           col_names = T)) %>% select(1, 41)
+
+names(BL_crosswalk) <- c("ScientificName2018", "ScientificName2010")
+
+tree <- ladderize(read.tree(paste0(source_predictors, "Weeks_et_at_2022/singe_bird_phylo.tre")))
+
+fp <- phyloregion::evol_distinct(tree, 
+                                 type = "fair.proportion", 
+                                 scale = F, 
+                                 use.branch.lengths = T) %>% as.data.frame()
+
+fp$tip.label <- rownames(fp)
+
+names(fp) <- c("FP", "tip.label")
+
+fp$ScientificName2010 <- gsub("_", " ", fp$tip.label)
+
+fp2 <- left_join(fp, BL_crosswalk)
+
+BigTab_all <- BigTab_all %>% 
+  rename("ScientificName2018" = "ScientificName")
+
+intersect(BigTab_all$ScientificName2018, 
+          fp2$ScientificName2018)# 784 sp matched directly via BL taxonomy from 2018 
+
+notMatched1 <- setdiff(BigTab_all$ScientificName2018, 
+                       fp2$ScientificName2018) # 25 sp not matched
+
+df_notMatched1 <- BigTab_all %>% 
+  select(verbatim_name, ScientificName2018) %>% 
+  filter(ScientificName2018 %in% notMatched1) %>% 
+  distinct()
+
+intersect(df_notMatched1$verbatim_name, 
+          fp$ScientificName2010) #18 match directly
+
+
+df_Matched2 <- left_join(df_notMatched1, fp2 %>% 
+                           rename("verbatim_name" = "ScientificName2010") %>% 
+                           select(-ScientificName2018))
+
+# intersect(df_notMatched1$verbatim_name, fp$ScientificName2010) #18 
+# intersect(df_notMatched1$ScientificName2018, fp$ScientificName) #1 
+
+BigTab9 <- left_join(BigTab_all %>% filter(!(ScientificName2018 %in% notMatched1)), 
+                     
+                     fp2 %>% filter(!(ScientificName2018 %in% notMatched1))) %>% 
+  
+  distinct(verbatim_name, dataset, tp, cell_grouping, .keep_all = T) %>%
+  left_join(df_Matched2) %>% 
+  distinct(verbatim_name, dataset, tp, cell_grouping, .keep_all = T)
+
+
+colSums(is.na(BigTab9))
+
+saveRDS(BigTab9, "../../Data/rds/A_3_AllPredictors_new.rds")
+
+```

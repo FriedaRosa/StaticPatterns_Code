@@ -1,0 +1,133 @@
+---
+title: "Predictor Variables Calculations 5"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+
+# Red List Status
+retrieved at IUCN using the API on 22.04.2024
+
+```{r}
+source("../src/A_config.R")
+
+
+#pacman::p_load("taxize", "tidyverse")
+
+
+sp_dd <- readRDS("../../Data/rds/AllPredictors_new.rds") %>% distinct(dataset, verbatim_name)
+Tax <- read.csv("../../Data/csv/A_3d_full_BirdLife2018_TaxonomicLookup.csv") 
+Tax$verbatim_name <- gsub(" ", "_", Tax$AtlasSp)
+sp_dd$verbatim_name <- gsub(" ", "_", sp_dd$verbatim_name)
+head(Tax)
+tax_dd <- left_join(sp_dd, Tax)
+head(tax_dd)
+
+
+spData2 <- Tax %>% pull(ScientificName)
+
+```
+
+
+```{r}
+#| eval: false
+# IUCN_REDLIST_KEY <- ########## # IUCN API Key
+
+IUCN.list2 <- iucn_summary(spData2, distr.detail = F, key = IUCN_REDLIST_KEY)
+IUCN <- iucn_status(IUCN.list2) 
+IUCN_df <- as.data.frame(IUCN, row.names = names(IUCN)) %>% rownames_to_column(var = "ScientificName") %>% left_join(Tax) %>% distinct(AtlasSp, IUCN)
+
+## Save Output
+saveRDS(IUCN_df, paste0(out_path, "Results/Predictors/A_3e_RedListCat_IUCN2024.rds"))
+
+```
+
+# National Redlists
+
+```{r}
+
+nrl_db <- read.csv2(paste0(source_predictors, "NRL/Aves_NationalRedLists.csv"))
+unique(tax_dd$dataset)
+
+# 1. Czech Republic Red List
+CZ_dd <- tax_dd %>% filter(dataset == "Birds_Atlas_Czechia")
+CZ_RL <- nrl_db %>% 
+filter(class == "Aves" & country == "Czech Republic") %>%
+mutate(verbatim_name = paste0(genus, "_", species)) %>%
+select(verbatim_name, simple_regional_status) # 99 species from CZ evaluated
+
+RL_Czechia <- left_join(CZ_dd, CZ_RL) %>% 
+rename("NRL_Status" = "simple_regional_status")
+
+# 2. Japan Red List
+JP_dd <- tax_dd %>% filter(dataset == "Birds_atlas_Japan")
+JP_RL <- nrl_db %>% 
+filter(class == "Aves" & country == "Japan") %>%
+mutate(verbatim_name = paste0(genus, "_", species)) %>% # 166 species from Japan
+select(verbatim_name, simple_regional_status)
+
+RL_Japan <- left_join(JP_dd, JP_RL) %>% 
+rename("NRL_Status" = "simple_regional_status")
+
+# 3. Europe Red List
+EU_dd <- tax_dd %>% filter(dataset == "Birds_atlas_EBBA")
+
+EU_RL <- read.csv2(paste0(source_predictors, "NRL/EuropeanRedList/EU_NRL_AVES.csv")) %>%
+mutate(verbatim_name = paste0(taxonomicRankGenus, "_", taxonomicRankSpecies)) %>% 
+select(verbatim_name, euRegionalRedListCategory)
+
+RL_Europe <- left_join(EU_dd, EU_RL) %>% 
+rename("NRL_Status" = "euRegionalRedListCategory")
+unique(RL_Europe$NRL_Status)
+
+
+
+
+# 4. New York Red List
+NY_dd <- tax_dd %>% filter(dataset == "Birds_Atlas_New_York")
+NY_RL <- read.csv2(paste0(source_predictors, "NRL/NYS_Birds_RedList.csv"))
+head(NY_RL)
+library(stringr)
+
+
+NY_RL$State_protection <- stringr::str_split(NY_RL$STATE, "-", simplify = TRUE)[, 1]
+NY_RL$NRL_Status <- stringr::str_split(NY_RL$STATE, "-", simplify = TRUE)[, 2]
+head(NY_RL)
+unique(NY_RL$NRL_Status)
+
+NY_RL$NRL_Status2 <- "LC"
+NY_RL <- NY_RL %>% 
+mutate(NRL_Status2 = 
+case_when(
+  NRL_Status == "T" ~ "VU",
+  NRL_Status == "E" ~ "EN",
+  State_protection == "Un" ~ "LC",        
+  .default = "LC")
+) %>%
+distinct(SCIENTIFIC.NAME, NRL_Status2) %>%
+rename("NRL_Status" = "NRL_Status2")
+
+NY_RL$verbatim_name <- gsub(" ", "_", NY_RL$SCIENTIFIC.NAME)
+NY_RL <- NY_RL %>% select(verbatim_name, NRL_Status)
+
+RL_NYS <- left_join(NY_dd, NY_RL) 
+
+
+
+# Compare
+head(RL_NYS)
+head(RL_Japan)
+head(RL_Europe)
+head(RL_Czechia)
+
+
+National_RedLists <- rbind(RL_Czechia, RL_Europe, RL_Japan, RL_NYS)
+saveRDS(National_RedLists, paste0(out_path, "Predictors/A_3e_National_RedLists.rds"))
+
+```

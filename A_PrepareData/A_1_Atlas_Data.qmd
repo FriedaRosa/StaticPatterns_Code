@@ -1,0 +1,177 @@
+ ---
+title: "A01_Atlas_Data_v2"
+format: html
+editor: visual
+---
+
+# Setting up the Environment:
+
+## source config.R and functions.R
+
+```{r}
+#| message: false
+#| results: hide
+#| warning: false
+#| label: 0_config
+
+source("../src/A_config.R")  # configurations / data paths / variables / plotting settings / libraries
+source("../src/functions.R") # processing functions
+
+```
+
+# Atlas data
+
+## Pre-process grids
+
+```{r}
+#| message: false
+#| warning: false
+#| label: 1_process_grids
+
+# We'll produce a list with two elements: 
+## 1) data frame indicating which cells are repeated; 
+## 2) processed grid list (all scales, all atlases)
+
+g <- process_grids(grid_paths, atlas_names, desired_levels) 
+all_repeated_df <- g[[1]]
+grid_list <- g[[2]]
+
+
+rm(g)
+```
+
+## Process data
+
+```{r}
+#| message: false
+#| warning: false
+#| label: 1_process_species_data
+
+presence_data2 <- process_species_data(data_paths, all_repeated_df, atlas_names, desired_levels)
+
+```
+
+### Data checks
+
+```{r}
+#| label: data-checks
+
+summary(presence_data2)
+colSums(is.na(presence_data2)) # cells not sampled were filled with NA in columns 'tp' and 'verbatim_name'
+levels(presence_data2$cell_grouping)
+
+
+# Summary sp and site numbers: Before reduction
+presence_data2 %>% 
+  filter(cell_grouping == 1) %>% 
+  group_by(dataset, tp) %>% 
+  summarise(n_sp = n_distinct(verbatim_name),
+            n_sites = n_distinct(cell_label))
+
+presence_data2 %>% 
+  ungroup() %>% 
+  summarise(n_sp = n_distinct(verbatim_name)) # 826 sp in total (before reduction) (= 827 - 1 for NA-species)
+
+# ==================== Save output & clean up environment ===================== #
+
+saveRDS(presence_data2, paste0(out_path, "rds/A_01_presence_data_raw.rds"))
+```
+
+## Filter data
+
+### Filter 1: Cells sampled twice
+
+-   remove cells (from the species data) that were not sampled twice
+
+```{r, mesaage = F, warning=FALSE}
+## Cells sampled twice 
+presence_data2 %>% 
+  filter(atlas_cell_repeated == 2) %>% 
+  distinct(dataset, cell_grouping, cell_label) %>%
+  group_by(dataset, cell_grouping) %>% 
+  summarise(n = n_distinct(cell_label))
+
+## Cells not sampled twice
+excluded1 <- presence_data2 %>% 
+  filter(atlas_cell_repeated %in% c(0,1)) %>% 
+  distinct(dataset, cell_grouping, cell_label) %>% 
+  filter(cell_grouping == 1) 
+
+table(excluded1$dataset) # CZ = 50, EBBA = 1393, Japan = 377, NY = 15
+
+```
+
+## Filter 2: Species sampled twice in those cells
+
+-   remove species that were not sampled twice in the cells that were sampled twice (because we don't have change data for them anyway).
+
+```{r, mesaage = F, warning=FALSE}
+## Filter level 2: Species sampled twice in the remaining cells
+common_sp <- presence_data2 %>% 
+  filter(atlas_cell_repeated == 2 & cell_grouping == 1) %>% 
+  group_by(dataset, verbatim_name) %>%
+  dplyr::summarise(num_periods_sp = n_distinct(tp)) 
+
+excluded_sp <- common_sp %>% 
+  filter(num_periods_sp == 1) %>% 
+  distinct(dataset, verbatim_name)
+
+table(excluded_sp$dataset) # CZ = 19 , EBBA = 15, Japan = 32, NY = 16
+
+excluded_sp %>% write.csv(paste0(out_path, "Documentation/A_01_ExcludedSp.csv")) # CZ: 19, EBBA = 14 (94?), JP = 32, NY = 16
+
+```
+
+## Filter Data
+
+```{r, mesaage = F, warning = F}
+
+presence_data_filt <- full_join(presence_data2, common_sp)  %>%  
+    filter(atlas_cell_repeated == 2 & num_periods_sp == 2) %>% 
+  mutate(atlas_cell_repeated = as.factor(atlas_cell_repeated))
+
+str(presence_data_filt)
+```
+
+### Data checks
+
+```{r}
+# ========================== Data checks ======================================= #
+presence_data_filt %>% 
+  filter(cell_grouping == 1) %>%
+  group_by(dataset, tp) %>% 
+  summarize(
+    n_sp = n_distinct(verbatim_name),
+    n_cells = n_distinct(cell_label))
+
+
+presence_data_filt %>% distinct(verbatim_name) %>% nrow() # 774 species 
+
+
+# ==================== Save output & clean up environment ===================== #  
+saveRDS(presence_data_filt, paste0(out_path, "rds/A_01_Presence_data_filtered.rds"))
+
+rm(common_sp, excluded1, excluded_sp)
+
+```
+
+### Mapping temporally replicated cells
+
+```{r}
+#| label: 1_map_replicated_cells
+#| message: false
+#| warning: false
+#| eval: false
+
+plot_map(grid_list, presence_data2, atlas_names, crs_list)
+
+
+```
+
+# Save Objects to RData
+
+```{r}
+
+save.image(paste0(out_path, "RData/A_01_Atlas_Data_clean.RData"))
+
+```

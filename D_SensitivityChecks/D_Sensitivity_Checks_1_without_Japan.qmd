@@ -1,0 +1,275 @@
+---
+title: "Sensitivity_Checks"
+format: html
+editor: visual
+---
+
+# Sensitivity Analyses
+
+## 1. Raptors & Nocturnal species may be insufficiently sampled generally
+
+## 2. Just a problem with Japan?
+
+# Define model variables (response, indices and predictors)
+
+```{r}
+library(dplyr)
+library(caret)
+library(ranger)
+```
+
+```{r}
+rm(list=ls())
+
+
+load("../Data/RData/04_FinalModels.RData")
+source("../Code/src/functions.R")
+```
+
+```{r}
+response <- "Jaccard" # Replace with your actual response variable name
+predictors <- reduced_predictors[[1]] # Replace with your actual predictors
+```
+
+```{r}
+
+dd0 <- dat_J1_v2 %>% filter(dataset != "Birds_atlas_Japan") %>% select(all_of(c(response, predictors))) 
+dd00 <- dat_J1_v2 %>% select(all_of(c(response, predictors))) 
+
+set.seed(42)
+# Initial split to training and validation set (for final evaluation, keep dat_test completely out of the training sets)
+index <- createDataPartition(dd0$Jaccard, p = 0.8, 1, list = FALSE)
+index00 <- createDataPartition(dd00$Jaccard, p = 0.8, 1, list = FALSE)
+
+dd <- dd0[index, ]
+dd_test <- dd0[-index, ]
+
+
+
+dd00_train <- dd00[index00, ]
+dd00_test <- dd00[-index00, ]
+# Cross-validation resampling indices 
+indices <- createDataPartition(dd0$Jaccard, p = 0.8, 10) # 10 resamples
+
+```
+
+```{r}
+
+# Define training control
+trained_control <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 3,
+  savePredictions = "final",
+  returnResamp = "final",
+  verboseIter = FALSE
+  #index = index 
+)
+
+rf_grid <- expand.grid(
+        mtry = 12,
+        splitrule = "variance",
+        min.node.size = 5
+      )
+```
+
+## Train model
+
+```{r}
+rf_all <- train(
+  as.formula(paste(response, "~ .")),
+  data = dd00_train,
+  method = "ranger",
+  
+  importance = "permutation",
+  #write.forest = TRUE,
+  
+  respect.unordered.factors = TRUE,
+  oob.error = TRUE,
+  trControl = trained_control,
+  tuneGrid = rf_grid)
+
+
+
+rf_simple <- train(
+  as.formula(paste(response, "~ .")),
+  data = dd,
+  method = "ranger",
+  
+  importance = "permutation",
+  #write.forest = TRUE,
+  
+  respect.unordered.factors = TRUE,
+  oob.error = TRUE,
+  trControl = trained_control,
+  tuneGrid = rf_grid)
+
+plot(varImp(rf_simple))
+plot(varImp(rf_all))
+
+
+
+cbind(varImp(rf_all), varImp(rf_simple))
+
+plot(pdp::partial(rf_simple, pred.var = "moran", plot = FALSE), xlim=c(0, 1), ylim=c(0, 1))
+plot(pdp::partial(rf_all, pred.var = "moran", plot = FALSE), xlim=c(0, 1), ylim=c(0, 1))
+
+```
+
+## Exclude species
+
+Haliaeetus albicilla\
+Spilornis cheela\
+Circus spilonotus\
+Accipiter gularis\
+Accipiter nisus\
+Accipiter gentilis\
+Butastur indicus\
+Buteo buteo\
+Nisaetus nipalensis\
+Otus lempiji\
+Otus sunia\
+Otus elegans\
+Strix uralensis\
+Ninox scutulata\
+Asio otus\
+Dendrocopos leucotos\
+Dendrocopos major\
+Dryocopus martius\
+Picus awokera\
+Picus canus\
+Falco tinnunculus\
+Falco subbuteo\
+Falco peregrinus\
+Zoothera sibirica\
+Zoothera dauma\
+Caprimulgus indicus
+
+```{r}
+bad_sp <- c("Haliaeetus albicilla",
+"Spilornis cheela",
+"Circus spilonotus",
+"Accipiter gularis",
+"Accipiter nisus",
+"Accipiter gentilis",
+"Butastur indicus",
+"Buteo buteo",
+"Nisaetus nipalensis",
+"Otus lempiji",
+"Otus sunia",
+"Otus elegans",
+"Strix uralensis",
+"Ninox scutulata",
+"Asio otus",
+"Dendrocopos leucotos",
+"Dendrocopos major",
+"Dryocopus martius",
+"Picus awokera",
+"Picus canus",
+"Falco tinnunculus",
+"Falco subbuteo",
+"Falco peregrinus",
+"Zoothera sibirica",
+"Zoothera dauma",
+"Caprimulgus indicus")
+
+# ---------------------- #
+
+file_path <- "../Data/rds/AllPredictors.rds"
+response <- "Jaccard"
+vars <- c("verbatim_name",H1_vars, H2_vars, H3_vars, H4_vars)
+tp_value <- 1
+
+# Function to process the data
+dat_J1 <- process_data(file_path, tp_value, response, vars)
+
+
+setdiff(bad_sp, dat_J1$verbatim_name)
+
+dd1 <- dat_J1 %>% 
+  filter(dataset != "Birds_atlas_Japan" & !(verbatim_name %in% bad_sp)) %>% 
+  select(all_of(c(response, predictors))) 
+
+
+```
+```{r}
+#| label: recipe-pre-processing-recipe-J1
+
+# Step 2 & 3: imputing missing values & removing highly correlated variables
+recipe_pp_J1 <- recipe(Jaccard ~ .,
+    data = dd1) %>%
+    step_corr(all_numeric_predictors(), threshold = .85) %>%
+    step_impute_knn(all_predictors())
+
+# Estimate recipe on data:
+recipe_pp_prepped_J1 <- prep(recipe_pp_J1, dd1)
+
+# Removed columns:
+recipe_pp_prepped_J1$steps[[1]]$removals
+
+# apply the recipe to the data:
+dat_J1_v2 <- bake(recipe_pp_prepped_J1, dd1)
+
+
+# Split data
+set.seed(42)
+index <- createDataPartition(dat_J1_v2$Jaccard, p = 0.8, 1, list = FALSE)
+dat_train_J <-  dat_J1_v2[index, ]
+dat_train_LR <-  dat_LR1_v2[index, ]
+
+dat_test_J <- dat_J1_v2[-index, ]
+dat_test_LR <- dat_LR1_v2[-index, ]
+
+indices10 <- createDataPartition(dat_train_J$Jaccard, p = 0.8, 10) # 10 resamples
+
+```
+
+
+```{r}
+# Define training control
+trained_control <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 3,
+  savePredictions = "final",
+  returnResamp = "final",
+  verboseIter = FALSE
+  #index = index 
+)
+
+rf_grid <- expand.grid(
+        mtry = 12,
+        splitrule = "variance",
+        min.node.size = 5
+      )
+
+
+rf_excl_sp <- train(
+  as.formula(paste(response, "~ .")),
+  data = dat_train_J,
+  method = "ranger",
+  
+  importance = "permutation",
+  #write.forest = TRUE,
+  
+  respect.unordered.factors = TRUE,
+  oob.error = TRUE,
+  trControl = trained_control,
+  tuneGrid = rf_grid)
+
+plot(varImp(rf_excl_sp))
+plot(varImp(rf_simple))
+plot(varImp(rf_all))
+
+plot(pdp::partial(rf_excl_sp, pred.var = "moran", plot = FALSE), xlim=c(0, 1), ylim=c(0, 1))
+plot(pdp::partial(rf_simple, pred.var = "moran", plot = FALSE), xlim=c(0, 1), ylim=c(0, 1))
+plot(pdp::partial(rf_all, pred.var = "moran", plot = FALSE), xlim=c(0, 1), ylim=c(0, 1))
+
+```
+
+```{r}
+Japan_new <- readRDS("../../../Datasets/Processed/Atlases/Replicated/Birds_atlas_Japan2/Birds_atlas_Japan2_beast_data.rds")
+Japan_new
+
+```
+

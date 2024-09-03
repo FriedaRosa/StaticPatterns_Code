@@ -1,0 +1,782 @@
+---
+title: "07_WinnersLosers"
+format: html
+editor: visual
+---
+
+this script was cut from 06_Predictions
+
+## Set Color vectors
+
+```{r}
+## Color vector for Log Ratio =============================================== ##
+my_cols_LR <- c("strong decrease (> halfing)" = "#d7191c",
+             "weak decrease (< halfing)" = "#fdae61",
+             "stable" = "#e0e0e0",
+             "weak increase (< doubling)" = "#a6d96a",
+             "strong increase (> doubling)" = "#1a9641")
+
+## Color vector for Jaccard ================================================= ##
+
+my_cols_J <- c("complete turnover (< 0.1)" = "#B35806",
+             "strong turnover (0.1 - 0.25)" = "#F1A340",
+             "strong intermediate turnover (0.25 - 0.5)" = "#FEE0B6",
+             "weak intermediate turnover (0.5 - 0.75)" = "#D8DAEB",
+             "weak turnover (> 0.75)" = "#998EC3",
+             "stable (> 0.9)" = "#542788")
+
+
+### Standard Theme ========================================================== ##
+common_theme <-   theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), 
+    axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 20),
+    axis.text = element_text(size = 16),
+    axis.text.x = element_text(vjust = 0.9, hjust = 0.9),
+    #plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+```
+
+# \>\> 1. Rank_J_predicted
+
+## 1. Species Ranks (Jaccard Predicted) colored by Log Ratio trend Observed
+
+```{r}
+
+## Czech Republic =========================================================== ##
+CZ_p_LR <- Czechia_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",       x = "",
+    title = "Czech Republic",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), 
+    axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## New Yoek State =========================================================== ##
+NY_p_LR <- NewYork_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",       x = "",
+    title = "New York State",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), 
+    axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Japan ==================================================================== ##
+JP_p_LR <- Japan_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",
+       x = "",
+    title = "Japan",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Europe =================================================================== ##
+EU_p_LR <- Europe_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",       x = "",
+    title = "Europe",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =2),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+
+## Grid them together ======================================================= ##
+pdf("../../Results/Figures/3_Predictions/Species_Predictions_coloredByLR.pdf", width = 27, height = 18)
+gridExtra::grid.arrange(CZ_p_LR, NY_p_LR, EU_p_LR, JP_p_LR, layout_matrix = rbind(c(1, 2), c(3, 4)))
+dev.off()
+
+
+
+## Save Figures as PPT ====================================================== ##
+# esquisse::ggplot_to_ppt(c("CZ_p_LR", "NY_p_LR", "EU_p_LR", "JP_p_LR"))
+
+```
+
+## 2. Species Ranks (Predicted Jaccard) colored by Jaccard Predicted
+
+```{r}
+
+## Czech Republic =========================================================== ##
+CZ_p_J <- Czechia_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_J_Predicted, 
+             color = trend_J_Predicted )) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",       x = "",
+    title = "Czech Republic",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## New Yoek State =========================================================== ##
+
+NY_p_J <- NewYork_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_J_Predicted, 
+             color = trend_J_Predicted )) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",       x = "",
+    title = "New York State",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## Japan ==================================================================== ##
+
+JP_p_J <- Japan_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_J_Predicted, 
+             color = trend_J_Predicted )) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",
+       x = "",
+    title = "Japan",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## Europe =================================================================== ##
+EU_p_J <- Europe_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_predicted), 
+             y = J_Predicted, 
+             fill = trend_J_Predicted, 
+             color = trend_J_Predicted )) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",       x = "",
+    title = "Europe",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =2),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## Grid them together ======================================================= ##
+pdf("../../Results/Figures/3_Predictions/Species_Predictions_coloredByJ.pdf", width = 27, height = 18)
+gridExtra::grid.arrange(CZ_p_J, NY_p_J, EU_p_J, JP_p_J, layout_matrix = rbind(c(1, 2), c(3, 4)))
+dev.off()
+
+
+## Save Figures as PPT ====================================================== ##
+# esquisse::ggplot_to_ppt(c("CZ_p_J", "NY_p_J", "EU_p_J", "JP_p_J"))
+
+```
+
+# \>\> 2. Rank_J_observed
+
+## 1. Species Ranks (Jaccard Observed) colored by Jaccard OBSERVED
+
+```{r}
+
+## Czech Republic =========================================================== ##
+CZ_p_J_obs <- Czechia_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_J_Observed, 
+             color = trend_J_Observed)) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",       x = "",
+    title = "Czech Republic",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## New Yoek State =========================================================== ##
+
+NY_p_J_obs <- NewYork_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_J_Observed, 
+             color = trend_J_Observed )) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",       x = "",
+    title = "New York State",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## Japan ==================================================================== ##
+
+JP_p_J_obs <- Japan_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_J_Observed, 
+             color = trend_J_Observed )) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",
+       x = "",
+    title = "Japan",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## Europe =================================================================== ##
+EU_p_J_obs <- Europe_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_J_Observed, 
+             color = trend_J_Observed )) +
+  geom_col()+
+  scale_color_manual(values = my_cols_J) +
+  scale_fill_manual(values = my_cols_J) +
+  labs(y = "Jaccard",       x = "",
+    title = "Europe",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =2),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+## Grid them together ======================================================= ##
+pdf("../../Results/Figures/3_Predictions/Species_Observed_coloredByJ.pdf", width = 27, height = 18)
+gridExtra::grid.arrange(CZ_p_J_obs, NY_p_J_obs, EU_p_J_obs, JP_p_J_obs, layout_matrix = rbind(c(1, 2), c(3, 4)))
+dev.off()
+
+
+## Save Figures as PPT ====================================================== ##
+# esquisse::ggplot_to_ppt(c("CZ_p_J_obs", "NY_p_J_obs", "EU_p_J_obs", "JP_p_J_obs"))
+
+```
+
+## 2. Species Ranks (J Observed) colored by LR observed
+
+```{r}
+
+## Czech Republic =========================================================== ##
+CZ_p_LR_J_observed <- Czechia_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",       x = "",
+    title = "Czech Republic",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## New Yoek State =========================================================== ##
+NY_p_LR_J_observed <- NewYork_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",       x = "",
+    title = "New York State",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Japan ==================================================================== ##
+JP_p_LR_J_observed <- Japan_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",
+       x = "",
+    title = "Japan",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Europe =================================================================== ##
+EU_p_LR_J_observed <- Europe_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_J_observed), 
+             y = J_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Jaccard",       x = "",
+    title = "Europe",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0.5, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =2),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+
+## Grid them together ======================================================= ##
+pdf("../../Results/Figures/3_Predictions/Species_Observed_coloredByLR.pdf", width = 27, height = 18)
+gridExtra::grid.arrange(CZ_p_LR_J_observed, NY_p_LR_J_observed, EU_p_LR_J_observed, JP_p_LR_J_observed, layout_matrix = rbind(c(1, 2), c(3, 4)))
+dev.off()
+
+
+
+## Save Figures as PPT ====================================================== ##
+# esquisse::ggplot_to_ppt(c("CZ_p_LR_J_observed", "NY_p_LR_J_observed", "EU_p_LR_J_observed", "JP_p_LR_J_observed"))
+```
+
+# \>\> 3. Rank_LR_observed
+
+```{r}
+
+## Czech Republic =========================================================== ##
+CZ_p_LR_LR_Observed <- Czechia_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_observed), 
+             y = LR_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",       x = "",
+    title = "Czech Republic",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## New Yoek State =========================================================== ##
+NY_p_LR_LR_Observed <- NewYork_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_observed), 
+             y = LR_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",       x = "",
+    title = "New York State",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Japan ==================================================================== ##
+JP_p_LR_LR_Observed <- Japan_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_observed), 
+             y = LR_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",
+       x = "",
+    title = "Japan",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Europe =================================================================== ##
+EU_p_LR_LR_Observed <- Europe_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_observed), 
+             y = LR_Observed, 
+             fill = trend_LR_Observed, 
+             color = trend_LR_Observed )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",       x = "",
+    title = "Europe",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =2),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+
+## Grid them together ======================================================= ##
+pdf("../../Results/Figures/3_Predictions/LR_Species_Observed_coloredByLR.pdf", width = 27, height = 18)
+gridExtra::grid.arrange(CZ_p_LR_LR_Observed, NY_p_LR_LR_Observed, EU_p_LR_LR_Observed, JP_p_LR_LR_Observed, layout_matrix = rbind(c(1, 2), c(3, 4)))
+dev.off()
+
+
+
+## Save Figures as PPT ====================================================== ##
+# esquisse::ggplot_to_ppt(c("CZ_p_LR_LR_Observed", "NY_p_LR_LR_Observed", "EU_p_LR_LR_Observed", "JP_p_LR_LR_Observed"))
+```
+
+# \>\> 4. Rank_LR_predicted
+
+```{r}
+## Czech Republic =========================================================== ##
+CZ_p_LR_LR_Predicted <- Czechia_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_predicted), 
+             y = LR_Predicted, 
+             fill = trend_LR_Predicted, 
+             color = trend_LR_Predicted )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",       x = "",
+    title = "Czech Republic",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## New Yoek State =========================================================== ##
+NY_p_LR_LR_Predicted <- NewYork_df %>%
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_predicted), 
+             y = LR_Predicted, 
+             fill = trend_LR_Predicted, 
+             color = trend_LR_Predicted )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",       x = "",
+    title = "New York State",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Japan ==================================================================== ##
+JP_p_LR_LR_Predicted <- Japan_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_predicted), 
+             y = LR_Predicted, 
+             fill = trend_LR_Predicted, 
+             color = trend_LR_Predicted )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",
+       x = "",
+    title = "Japan",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =3.8),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+## Europe =================================================================== ##
+EU_p_LR_LR_Predicted <- Europe_df %>% 
+  ggplot(aes(x = forcats::fct_reorder(verbatim_name, Rank_LR_predicted), 
+             y = LR_Predicted, 
+             fill = trend_LR_Predicted, 
+             color = trend_LR_Predicted )) +
+  geom_col()+
+#  scale_color_brewer(palette = "PuOr", direction = 1) +
+#  scale_fill_brewer(palette = "PuOr", direction = 1) +
+  scale_fill_manual(values = my_cols_LR) +
+  scale_color_manual(values = my_cols_LR) +
+  labs(y = "Log Ratio AOO",       x = "",
+    title = "Europe",
+    fill = "Species Trend",
+    colour = "Species Trend") +
+  geom_hline(yintercept = 0, lwd = 0.1)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 10),
+    axis.text.x = element_text(angle = 90, vjust = 0.9, hjust = 0.9, size =2),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+
+
+
+## Grid them together ======================================================= ##
+pdf("../../Results/Figures/3_Predictions/LR_Species_Predictions_coloredByLR.pdf", width = 27, height = 18)
+gridExtra::grid.arrange(CZ_p_LR_LR_Predicted, NY_p_LR_LR_Predicted, EU_p_LR_LR_Predicted, JP_p_LR_LR_Predicted, layout_matrix = rbind(c(1, 2), c(3, 4)))
+dev.off()
+
+
+
+## Save Figures as PPT ====================================================== ##
+# esquisse::ggplot_to_ppt(c("CZ_p_LR_LR_Predicted", "NY_p_LR_LR_Predicted", "EU_p_LR_LR_Predicted", "JP_p_LR_LR_Predicted"))
+```

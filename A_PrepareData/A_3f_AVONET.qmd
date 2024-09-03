@@ -1,0 +1,89 @@
+---
+title: "Predictor Variables Calculations 5"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+
+```{r}
+source("../src/A_config.R")
+
+```
+
+
+```{r}
+TaxLookup <- read.csv("../../Data/csv/A_3d_full_BirdLife2018_TaxonomicLookup.csv")
+
+avonet <- read.csv(paste0(source_predictors, "/AVONET/ELEData/TraitData/AVONET1_BirdLife.csv")) %>% 
+    select(Species1, Family1, Order1, 
+    Hand.Wing.Index, Mass, 
+    Habitat, Habitat.Density, Migration, 
+    Trophic.Level, Trophic.Niche, 
+    Primary.Lifestyle, Range.Size) %>% 
+    rename("ScientificName" = "Species1")
+
+avonet_modfied <- avonet %>% 
+    mutate(ScientificName = case_when(
+        ScientificName == "Cyanecula svecica" ~ "Luscinia svecica",
+        ScientificName == "Bonasa bonasia" ~ "Tetrastes bonasia",
+        #ScientificName == "Cuculus saturatus" ~"Cuculus optatus",
+        .default = ScientificName))
+avonet <- avonet_modfied
+
+head(avonet)
+names(avonet)
+```
+
+```{r}
+
+
+## Direct Match ScientificName ~ ScientificName
+sp_directly <- intersect(TaxLookup$ScientificName, avonet$ScientificName)#787 species match directly ## 789 after modifying the names by hand
+intersect(TaxLookup$Synonyms, avonet$ScientificName) %>% length() # 6 species match via synonyms ## 7 v2
+
+Avonet1 <- left_join(TaxLookup %>% distinct(ScientificName, Synonyms, AtlasSp), avonet %>% filter(ScientificName %in% sp_directly))
+head(Avonet1)
+colSums(is.na(Avonet1))
+
+
+# Not Matched Directly: Try matching with original Name ScientificName ~ AtlasSp
+#25 sp not in AVONET ## 23 v2
+not_matched <- Avonet1 %>% filter(is.na(Mass)) %>% distinct(ScientificName, .keep_all=T) 
+sp_syn <- intersect(not_matched$AtlasSp, avonet$ScientificName)  # 20 of those match via AtlasSp original name
+Avonet2 <- left_join(TaxLookup %>% distinct(ScientificName, AtlasSp) %>% filter(AtlasSp %in% sp_syn), avonet %>% filter(ScientificName %in% sp_syn) %>% rename("AtlasSp" = "ScientificName"))
+Avonet1 <- Avonet1 %>% filter(!is.na(Mass)) %>% select(-Synonyms)
+Avonet1 %>% distinct(AtlasSp) %>% nrow()
+Avonet2 %>% distinct(AtlasSp) %>% nrow()
+
+names(Avonet1)
+names(Avonet2)
+
+Avonet3 <- rbind(Avonet1, Avonet2)
+colSums(is.na(Avonet3))
+
+# Not Matched via original Name: 
+not_matched2 <- setdiff(TaxLookup$AtlasSp, Avonet3$AtlasSp)  # 7 Species missing from AVONET still #v2: 3 but those are correctly missing. 
+TaxLookup %>% filter(AtlasSp %in% not_matched2)
+
+# avonet %>% filter(ScientificName == "Cyanecula svecica") # yes
+# avonet %>% filter(ScientificName == "Bonasa bonasia") # yes
+# avonet %>% filter(ScientificName == "Luscinia svecica") # Nope. But same as Cyanecula svecica
+# avonet %>% filter(ScientificName == "Tetrastes bonasia") # Nope. But same as Bonasa bonasia
+avonet %>% filter(ScientificName == "Cuculus optatus") # nope used to be same as saturatus but they split.
+avonet %>% filter(ScientificName == "Cuculus saturatus") # yes: Synonym Column
+
+Avonet3 %>% distinct(AtlasSp) # 838 (looks good!)
+
+```
+
+
+
+```{r}
+saveRDS(Avonet3, paste0(out_path, "Predictors/A_3f_AVONET.rds"))
+```

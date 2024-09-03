@@ -1,0 +1,358 @@
+---
+title: "Script 4b - Partial Plots"
+date: "2023-05-29"
+---
+
+## Source custom functions
+
+```{r}
+#| label: load-functions
+#| message: false
+#| warning: false
+rm(list = ls())
+source("../src/B_config.R")
+source("../src/functions.R")
+
+load("../../Data/RData/B_04_FinalModels.RData")
+
+all_models <- readRDS(paste0(out_path, "rds/B_02_Final_ranger_list_reduced.rds"))
+```
+
+## MachineLearning packages
+
+```{r}
+#| label: load-plotting-packages
+#| message: false
+#| error: false
+
+pckgs <- c("dplyr", "ggplot2", "reshape2", 
+           "pdp", 
+           "gridExtra", "patchwork", "export")
+
+install_and_load(pckgs)
+```
+
+## Load RData to reduce computing time
+
+```{r}
+#| label: load-RData
+#| message: false
+#| error: false
+
+# Load final workspace to save computing time:
+load("../../Data/RData/B_04b_pdp.RData")
+```
+
+# Partial Dependence Plots
+
+::: panel-tabset
+## Jaccard 1
+
+```{r}
+#| label: set-variables-J
+
+pp_list_ranger_J <- replicate(39, list())
+ranger <- all_models[[1]]
+
+
+dd <- dat_train_list[[1]]
+pred_vars <- names(ranger$trainingData)[-1]
+```
+
+```{r}
+#| label: calculate-partial-dependencies-J
+#| eval: false
+
+# Get all partial dependencies ==================
+
+for (var in seq_along(1:length(pred_vars))){
+    pred_var <- pred_vars[var]
+    pp_list_ranger_J[[var]] <- partial(
+        ranger,
+        pred.var = pred_var,
+        plot = FALSE)
+}
+
+
+
+pp_list_ranger_J
+
+saveRDS(pp_list_ranger_J, "../../Data/rds/B_04b_pdp_list_J.rds")
+
+```
+
+```{r}
+#| label: partial-dependence-plots-J
+pp_list_J <- pp_list_ranger_J
+pp_list_J <- readRDS("../../Data/rds/B_04b_pdp_list_J.rds")
+
+lookup <- c("Moran's I" = "moran", 
+            "Prevalence" = "rel_occ_Ncells",
+            "AOO" = "AOO", 
+            "Fractal Dimension" = "D_AOO_a",
+            "Circularity" = "circ", 
+            "Relative Related \n  Circumscribing Circle" = "rel_relCirc",
+            "SAC scale" = "x_intercept", 
+            "Mean Probability \n of Co-occurrence" = "mean_prob_cooccur",
+            "Global Range Size" = "GlobRangeSize_m2",
+            "Species Range \n Centroid Latitude" = "sp_centr_lat",
+            "Mean Species-Level \n B Diversity" = "BetaSR_sp",
+            "Distance from \n range centroid to \n atlas center of gravity" = "Dist_centroid_to_COG",
+            "Species Range \n Centroid Longitude" = "sp_centr_lon",
+            "Southernness Index" = "Southernness",
+            "Mean Species-Level \n A Diversity" = "AlphaSR_sp",
+            "Westernness Index" = "Westernness",
+            "Trophic Niche" = "Trophic.Niche",
+            "Atlas Width \n of the minimum Rectangle" = "widthMinRect",
+            "Habitat Type" = "Habitat",
+            "Study Region" = "dataset",
+            "Min Distance \n from range centroid \n to atlas border" = "minDist_toBorder_centr")
+lookup_df <- as.data.frame(lookup)
+lookup_df$label <- names(lookup)
+
+
+
+# Plotting
+
+# Define the predictor names
+predictors <- pred_vars
+lookup_df2 <- merge(as.data.frame(predictors), lookup_df, by.x = "predictors", by.y = "lookup", all.x =T) #
+lookup_df2 <- lookup_df2[match(pred_vars, lookup_df2$predictors), ]
+
+
+
+
+
+# Initialize an empty list to store the plots
+plots <- list()
+
+# Function to determine if a column is categorical
+is_categorical <- function(column) {
+  is.factor(column) || is.character(column)
+}
+
+# Loop through the indices and create plots
+for (i in seq_along(1:length(predictors))) {
+  predictor <- names(pp_list_J[[i]])[1]
+  
+  if (is_categorical(dd[[predictor]])) {
+    # Create boxplot for categorical predictors
+    plots[[i]] <- ggplot() +
+      geom_point(data = pp_list_J[[i]], 
+                   aes(x = .data[[predictor]], y = yhat), alpha = 0.6) +
+      geom_hline(yintercept = 0.5, linewidth = 0.3, col = "red")+
+      labs(x = paste(lookup_df2[i,]$label), 
+           y =  expression(italic(J) ~ "(Partial)")) +
+      common_theme +
+      theme(axis.text.x = element_text(angle = 50))+ 
+      ylim(0.25, 0.75)
+  } else {
+    # Create line plot for continuous predictors
+    plots[[i]] <- ggplot() +
+      geom_line(data = pp_list_J[[i]], 
+                aes(x = .data[[predictor]], y = yhat),
+                linewidth = 0.8, alpha = 0.8) +
+      labs(x = paste(lookup_df2[i,]$label), 
+           y = expression(italic(J) ~ "(Partial)")) +
+      #scale_x_continuous(labels = scales::number_format()) +
+      common_theme +
+      ylim(0.25, 0.75)
+  }
+}
+
+plots
+
+```
+
+```{r}
+#| fig.width: 10
+#| fig.height: 19
+### All of them ====
+
+wrap_plots(plots, ncol = 3) + 
+plot_layout(tag_level = 'keep', guides = 'collect', axes = "collect_y") +
+plot_annotation(tag_levels = 'a', tag_suffix = ')')
+
+graph2ppt(file="../../Results/Figures/B2_MachineLearning/B_04b_All_PartialPlots_J.ppt", width=9, height=18)
+
+```
+
+```{r}
+#| fig.width: 6
+#| fig.height: 12
+#### Reduced ====
+
+wrap_plots(plots[c(1, 2, 4, 5, 6, 8, 11, 15)], ncol = 2) + 
+plot_layout(tag_level = 'new', guides = 'collect') +
+plot_annotation(tag_levels = 'a', tag_suffix = ')')
+
+graph2ppt(file="../../Results/Figures/B2_MachineLearning/B_04b_ReducedPartialPlots_J.ppt", width=6, height=12)
+```
+
+## LogRatio 1
+
+```{r}
+#| label: set-variables-LR
+pp_list_ranger_LR <- replicate(39, list())
+ranger <- all_models[[2]]
+
+dd <- dat_train_list[[2]] 
+pred_vars <- names(ranger$trainingData)[-1]
+
+
+```
+
+```{r}
+#| label: calcualte-partial-dependencies-LR
+#| eval: false
+
+# Get all partial dependencies ==================
+for (var in seq_along(1:length(pred_vars))){
+    pred_var <- pred_vars[var]
+    pp_list_ranger_LR[[var]] <- partial(
+        ranger,
+        pred.var = pred_var,
+        plot = FALSE)
+}
+
+
+
+pp_list_ranger_LR 
+saveRDS(pp_list_ranger_LR, "../../Data/rds/B_04b_pdp_list_LR.rds")
+
+```
+
+```{r}
+
+#| label: partial-dependence-plots-LR
+
+
+common_theme_small <- theme_classic() +
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), 
+    axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 8),
+    axis.text = element_text(size = 5),
+    axis.text.x = element_text(vjust = 0.9, hjust = 0.9),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none"
+  )
+
+
+
+pp_list_LR <- readRDS("../../Data/rds/B_04b_pdp_list_LR.rds")
+# Plotting
+
+# Define the predictor names
+predictors <- pred_vars
+
+
+lookup <- c("Moran's I" = "moran", 
+            "Prevalence" = "rel_occ_Ncells",
+            "AOO" = "AOO", 
+            "Fractal Dimension" = "D_AOO_a",
+            "Circularity" = "circ", 
+            "Relative Related \n Circumscribing Circle" = "rel_relCirc",
+            "SAC scale" = "x_intercept", 
+            "Mean Probability \n of Co-occurrence" = "mean_prob_cooccur",
+            "Global Range Size" = "GlobRangeSize_m2",
+            "Species Range \n Centroid Latitude" = "sp_centr_lat",
+            "Mean Species-Level \n B Diversity" = "BetaSR_sp",
+            "Distance from range \n centroid to Atlas \n Center of Gravity" = "Dist_centroid_to_COG",
+            "Species Range \n Centroid Longitude" = "sp_centr_lon",
+            "Southernness Index" = "Southernness",
+            "Mean Species-Level \n A Diversity" = "AlphaSR_sp",
+            "Westernness Index" = "Westernness",
+            "Trophic Niche" = "Trophic.Niche",
+            "Atlas Width of \n the minimum Rectangle" = "widthMinRect",
+            "Habitat Type" = "Habitat",
+            "Study Region" = "dataset",
+            "Climate Niche Breadth \n (PC2)" = "sd_PC2",
+            "Relative max Distance" = "rel_maxDist",
+            "Bearing of the \n minimum Rectangle \n of the Range" = "bearingMinRect",
+            "Climate Niche Breadth \n (PC1)" = "sd_PC1", 
+            "Min Distance to the \n Study Region Border \n from Range Centroid" = "minDist_toBorder_centr",
+            "Relative Linearity" = "rel_lin",
+            "Relative Elongation Ratio" = "rel_elonRatio",
+            "Body Mass" = "Mass", 
+            "Hand-Wing Index" = "Hand.Wing.Index",
+            "Bearing of Species Range" = "bearing",
+            "Atlas Bearing \n of the minimum Rectangle" = "atlas_bearingMinRect",
+            "Atlas Width of \n the minimum Rectangle" = "atlas_widthMinRect",
+            "IUCN Global Threat Status" = "IUCN",
+            "Primary Lifestyle" = "Primary.Lifestyle",
+            "Habitat Density" = "Habitat.Density",
+            "Elongation Ratio \n of the minimum \n Rectangle of the Range" = "elonMinRect",
+            "Migration Type" = "Migration",
+            "Phylogenetic \n Distinctness" = "FP")
+
+lookup_df <- as.data.frame(lookup)
+lookup_df$label <- names(lookup)
+
+# Define the predictor names
+predictors <- pred_vars
+lookup_df2 <- merge(as.data.frame(predictors), lookup_df, by.x = "predictors", by.y = "lookup", all.x =T) 
+lookup_df2 <- lookup_df2[match(pred_vars, lookup_df2$predictors), ]
+
+
+
+
+
+
+
+
+# Initialize an empty list to store the plots
+plots <- list()
+
+# Function to determine if a column is categorical
+is_categorical <- function(column) {
+  is.factor(column) || is.character(column)
+}
+
+# Loop through the indices and create plots
+for (i in seq_along(1:length(predictors))) {
+  predictor <- names(pp_list_LR[[i]])[1]
+  
+  if (is_categorical(dd[[predictor]])) {
+    # Create boxplot for categorical predictors
+    plots[[i]] <- ggplot() +
+      geom_point(data = pp_list_LR[[i]], 
+                   aes(x = .data[[predictor]], y = yhat), alpha = 0.6) +
+      geom_hline(yintercept = 0, linewidth = 0.3, col = "red")+
+      labs(x = paste(lookup_df2[i,]$label), 
+           y =  expression(italic(J) ~ "(Partial)")) +
+      common_theme +
+      theme(axis.text.x = element_text(angle = 50))+ 
+      ylim(-1, 1)
+  } else {
+    # Create line plot for continuous predictors
+    plots[[i]] <- ggplot() +
+      geom_line(data = pp_list_LR[[i]], 
+                aes(x = .data[[predictor]], y = yhat),
+                linewidth = 0.8, alpha = 0.8) +
+      geom_hline(yintercept = 0, linewidth = 0.3, col = "red")+
+      labs(x = paste(lookup_df2[i,]$label), 
+           y = expression(italic(J) ~ "(Partial)")) +
+      #scale_x_continuous(labels = scales::number_format()) +
+      common_theme +
+      ylim(-1, 1)
+  }
+}
+
+plots
+```
+
+```{r}
+#| fig.width: 16
+#| fig.height: 30
+# Arrange the plots in a grid
+# gridExtra::grid.arrange(grobs = plots, ncol = 4)
+
+
+wrap_plots(plots, ncol = 4) + 
+plot_layout(tag_level = 'keep', guides = 'collect', axes = "collect_y") +
+plot_annotation(tag_levels = '1', tag_suffix = ')')
+
+graph2ppt(file="../../Results/Figures/B2_MachineLearning/B_04b_All_PartialPlots_LR.ppt", width=16, height=30)
+```
+:::

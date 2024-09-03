@@ -1,0 +1,334 @@
+---
+title: "Sensitivity_Checks 2"
+format: html
+editor: visual
+---
+
+# Japan incl. Questionnaires
+
+```{r}
+rm(list=ls())
+gc()
+
+
+
+# Spatial:
+suppressPackageStartupMessages(library(sf)) ; sf_use_s2(FALSE) # switch spherical geometry off
+
+# Data handling:
+suppressPackageStartupMessages(library(rstatix))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(tidyr)) 
+
+
+
+
+
+# Folders
+source_atlas <- c("c:/Users/wolke/OneDrive - CZU v Praze/Datasets/Processed/Atlases/Replicated/")
+source_predictors <- c("c:/Users/wolke/OneDrive - CZU v Praze/Dokumenty/PhD_Projects/StaticPredictors/Data/")
+source_Git <- c("c:/Users/wolke/OneDrive - CZU v Praze/Dokumenty/GitHub/StaticPredictors_Woelke_et_al_2024/")
+
+# Folder paths to atlas data
+source_paths <- c(paste0(source_atlas, "Birds_Atlas_Czechia/"), 
+                  paste0(source_atlas, "Birds_Atlas_New_York/"), 
+                  paste0(source_atlas, "Birds_atlas_Japan/"), 
+                  paste0(source_atlas, "Birds_atlas_EBBA/"))
+
+# Folder path to output folder
+out_path <- c(paste0(source_Git, "Results/"))
+
+# Paths to data & grids
+data_paths <- c(paste0(source_paths[1],"Birds_Atlas_Czechia_beast_data.rds"), 
+                paste0(source_paths[2], "Birds_Atlas_New_York_beast_data.rds"), 
+                paste0(source_paths[3], "Birds_atlas_Japan_beast_data.rds"),
+                paste0(source_paths[4], "Birds_atlas_EBBA_beast_data_CHANGE.rds"))
+
+grid_paths <- c(paste0(source_paths[1],"Birds_Atlas_Czechia_grid.gpkg"), 
+                paste0(source_paths[2], "Birds_Atlas_New_York_grid.gpkg"), 
+                paste0(source_paths[3], "Birds_atlas_Japan_grid.gpkg"),
+                paste0(source_paths[4], "Birds_atlas_EBBA_grid.gpkg"))
+
+
+# Vectors for loops:
+atlas_names <- c("Birds_Atlas_Czechia", "Birds_Atlas_New_York","Birds_atlas_Japan", "Birds_atlas_EBBA")
+time_periods <- c(1,2)
+
+# Define the desired order of factor levels
+desired_levels <- factor(c("1", "2","4", "8", "16", "32", "64", "128"), ordered = T,  
+                         levels = c("1", "2","4", "8", "16", "32", "64", "128")) 
+
+crs_list <- c("epsg:5514", "epsg:32118", "epsg:6684", "epsg:3035") # CZ, NY, JP, EBBA
+```
+
+
+# Atlas data
+
+## Preprocess grids
+
+```{r}
+#| message: false
+#| warning: false
+#| label: 1_process_grids
+
+# make list with names of layers so we can read them in below
+layers_list <- list()
+for (i in seq_along(grid_paths)){
+  layers <- st_layers(grid_paths[i])$name
+  layers_list[[i]] <- layers
+  }
+names(layers_list) <- atlas_names
+
+
+# read & process grids to a list
+grid_list <- list()
+for (a in seq_along(grid_paths)) {
+  
+    grids <- sapply(layers_list[[a]], function(i) {
+      st_read(grid_paths[[a]], paste(i), quiet = TRUE) %>% 
+        reorder_levels(cell_grouping, order=desired_levels) %>% 
+        mutate(atlas_cell_repeated = case_when(area1s != 0 & area2s != 0 ~ 2, #twice
+                                              (area1s != 0 & area2s == 0) | (area1s == 0 & area2s != 0) ~ 1, #once
+                                               area1s == 0 & area2s == 0 ~ 0, #never
+                                               TRUE ~ NA)) # if neither of these: set NA
+      # %>% st_transform(crs = crs_list[a]) 
+      # not neccessary as we don't do any spatial calculations. Right now they are all prepared in the same CRS (WGS84)
+      
+      },
+      simplify = FALSE)
+    
+    
+        grid_list[[a]] <- grids
+    }
+
+# clear space
+rm(a, i, layers, layers_list, grids)
+
+
+# Save which cells were repeated for filtering the data
+all_repeated_df <- do.call(rbind, lapply(seq_along(grid_list), function(j) {
+  grids <- grid_list[[j]]
+  do.call(rbind, lapply(grids, function(grid) {
+    grid %>% 
+      st_drop_geometry() %>% 
+      distinct(cell_grouping, cell_label, atlas_cell_repeated, cell_lat, cell_long, area) %>% 
+      mutate(dataset = atlas_names[j])
+  }))
+}))
+rownames(all_repeated_df) <- NULL
+
+
+
+```
+
+## Process data
+
+```{r}
+#| message: false
+#| warning: false
+#| label: 1_process_data
+
+
+# Species data  =====================
+presence_data <- list()
+for (i in seq_along(data_paths)){
+  pres_dat <- readRDS(data_paths[i])
+  sy <- sort(unique(pres_dat$start_year))
+  
+  pres_dat2 <- pres_dat %>%     
+    ungroup() %>%
+    
+    # Add time-period column
+    mutate(tp = case_when(start_year == sy[1] ~ 1, 
+                          start_year == sy[2] ~ 2)) %>% 
+    filter(tp %in% c(1,2)) %>%
+    
+    # Reorder spatial scales from small to large
+    reorder_levels(cell_grouping, order=desired_levels) %>% 
+    select(any_of(c("dataset", "tp", "cell_grouping", 
+           "cell_label", "cell_lat", "cell_long", "area", 
+           "verbatim_name", "field_surveys", "questionnaires"))) 
+    
+  pres_dat3 <- all_repeated_df %>% 
+    filter(dataset == atlas_names[i]) %>%
+    group_by(cell_grouping, dataset) %>% 
+    left_join(pres_dat2)
+  
+  presence_data[[i]] <- pres_dat3
+}
+
+# Merge list of atlases together
+presence_data2 <- plyr::rbind.fill(presence_data, fill=T) %>% 
+  distinct(dataset, tp, verbatim_name, cell_grouping, cell_label, .keep_all = T)
+
+presence_data2$tp <- as.factor(presence_data2$tp)
+presence_data2$dataset <- as.factor(presence_data2$dataset)
+presence_data2$cell_grouping <- as.factor(presence_data2$cell_grouping)
+presence_data2$atlas_cell_repeated <- as.factor(presence_data2$atlas_cell_repeated)
+
+
+rm(sy, pres_dat, pres_dat2, pres_dat3, i)
+
+
+```
+
+### Data checks
+
+```{r}
+
+summary(presence_data2)
+colSums(is.na(presence_data2)) # cells not sampled were filled with NA in columns 'tp' and 'verbatim_name'
+levels(presence_data2$cell_grouping)
+
+
+# Summary sp and site numbers: Before reduction
+presence_data2 %>% 
+  filter(cell_grouping == 1) %>% 
+  group_by(dataset, tp) %>% 
+  summarise(n_sp = n_distinct(verbatim_name),
+            n_sites = n_distinct(cell_label))
+
+presence_data2 %>% 
+  ungroup() %>% 
+  summarise(n_sp = n_distinct(verbatim_name)) # 826 sp in total (before reduction) (= 827 - 1 for NA-species)
+
+# ==================== Save output & clean up environment ===================== #
+
+saveRDS(presence_data2, paste0(out_path, "rds/01_presence_data_raw_Japan2.rds"))
+```
+
+## Filter data
+
+### Filter 1: Cells sampled twice
+
+-   remove cells (from the species data) that were not sampled twice
+
+```{r, mesaage = F, warning=FALSE}
+## Cells sampled twice 
+presence_data2 %>% 
+  filter(atlas_cell_repeated == 2) %>% 
+  distinct(dataset, cell_grouping, cell_label) %>%
+  group_by(dataset, cell_grouping) %>% 
+  summarise(n = n_distinct(cell_label))
+
+## Cells not sampled twice
+excluded1 <- presence_data2 %>% 
+  filter(atlas_cell_repeated %in% c(0,1)) %>% 
+  distinct(dataset, cell_grouping, cell_label) %>% 
+  filter(cell_grouping == 1) 
+
+table(excluded1$dataset) # CZ = 50, EBBA = 1393, Japan = 377, NY = 15
+
+```
+
+## Filter 2: Species sampled twice in those cells
+
+-   remove species that were not sampled twice in the cells that were sampled twice (because we don't have change data for them anyway).
+
+```{r, mesaage = F, warning=FALSE}
+## Filter level 2: Species sampled twice in the remaining cells
+common_sp <- presence_data2 %>% ungroup() %>%
+  filter(atlas_cell_repeated == 2 & cell_grouping == 1) %>% 
+  group_by(dataset, verbatim_name) %>%
+  dplyr::summarise(num_periods_sp = n_distinct(tp)) 
+
+excluded_sp <- common_sp %>% 
+  filter(num_periods_sp == 1) %>% 
+  distinct(dataset, verbatim_name)
+
+table(excluded_sp$dataset) # CZ = 19 , EBBA = 15, Japan = 1, NY = 16
+
+excluded_sp %>% write.csv(paste0(out_path, "Documentation/01_ExcludedSp_Japan2.csv")) # CZ: 19, EBBA = 14 (94?), JP = 32, NY = 16
+
+```
+
+## Filter Data
+
+```{r, mesaage = F, warning = F}
+
+presence_data_filt <- full_join(presence_data2, common_sp)  %>%  
+    filter(atlas_cell_repeated == 2 & num_periods_sp == 2) 
+
+presence_data_filt$atlas_cell_repeated <- as.factor(presence_data_filt$atlas_cell_repeated)
+
+str(presence_data_filt)
+```
+
+### Data checks
+
+```{r}
+# ========================== Data checks ======================================= #
+presence_data_filt %>% 
+  filter(cell_grouping == 1) %>%
+  group_by(dataset, tp) %>% 
+  summarize(
+    n_sp = n_distinct(verbatim_name),
+    n_cells = n_distinct(cell_label))
+
+
+presence_data_filt %>% distinct(verbatim_name) %>% nrow() # 646 species 
+
+
+# ==================== Save output & clean up environment ===================== #  
+saveRDS(presence_data_filt, paste0(out_path, "rds/01_Presence_data_filtered_Japan2.rds"))
+
+rm(common_sp, excluded1, excluded_sp, presence_data)
+
+```
+
+### Mapping temporally replicated cells
+
+```{r}
+#| label: 1_map_replicated_cells
+#| message: false
+#| warning: false
+#| eval: false
+
+
+for (a in seq_along(grid_list)){
+  
+  for (scale in seq_along(length(grid_list[[a]]))){
+  
+    t_common_cells <- presence_data2 %>% 
+    filter(dataset == atlas_names[[a]] & cell_grouping == scale) %>% 
+    mutate(atlas_cell_repeated = as.factor(atlas_cell_repeated))
+  
+    
+    t_grid <- grid_list[[a]][[scale]] %>% st_transform(crs = crs_list[a])
+  
+    t_grid$atlas_cell_repeated <- as.factor(t_grid$atlas_cell_repeated)
+  
+    t_grid2 <- full_join(t_grid, t_common_cells) %>% 
+      mutate(repeated = case_when(is.na(atlas_cell_repeated) ~ "never",
+                                  atlas_cell_repeated == 1 ~ "once",
+                                  atlas_cell_repeated == 0 ~ "never",
+                                  atlas_cell_repeated == 2 ~ "both")) %>% 
+      mutate(repeated = as.factor(repeated)) %>% 
+      reorder_levels(repeated, order = c("never", "once", "both"))
+  
+    # Mapping
+    plot(t_grid2["repeated"], pal = hcl.colors(3, hcl.pals(type = "divergingx")[13], alpha = 0.7))
+  
+    print(t_grid2 %>% 
+      filter(repeated == "both" & cell_grouping == 1) %>% 
+      mutate(Total_area_sampled = sum(area)) %>% 
+      pull(Total_area_sampled) %>% unique() )
+  
+    }
+
+  }
+```
+
+# Save Objects to RData
+
+```{r}
+
+save.image(paste0(out_path, "RData/01_Atlas_Data_clean_Japan2.RData"))
+
+## We need these:
+#atlas_names
+#time_periods
+#grid_list
+#presence_data_filt
+
+```

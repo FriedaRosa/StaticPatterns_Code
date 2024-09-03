@@ -1,0 +1,171 @@
+---
+title: "Script 3 - Hyperparameter Tuning"
+date: "2023-05-29"
+---
+
+## Source custom functions
+
+```{r}
+#| label: load-packages
+#| message: false
+#| warning: false
+rm(list = ls())
+source("../src/B_config.R")
+source("../src/functions.R")
+detach("package:plyr", unload = TRUE)
+
+reduced_predictors <- readRDS("../../Data/rds/B_02_selected_predictors_list.rds")
+saved_models <- readRDS( paste0(out_path, "rds/B_02_Final_ranger_list_reduced.rds"))
+
+
+```
+
+## Load RData/RDS objects to reduce computing time
+
+```{r}
+#| label: load-RData
+#| message: false
+#| error: false
+
+# Load workspace to save computing time:
+load("../../Data/RData/B_03_reduced_hyper_para_tuning_all_models.RData")
+
+```
+
+#### Model Evaluation
+
+Here we will extract the model performance, best hyperparameters and variable importances from each model and compare them.
+
+::: panel-tabset
+## Jaccard
+
+```{r}
+# reduced predictor models:
+
+
+## Ranger =====
+saved_models[[1]]$finalModel
+saved_models[[1]]$results
+plot(saved_models[[1]])
+
+
+saved_models[[1]]
+
+## Importance frame (wide format) ===
+importances_wide_J <- varImp(saved_models[[1]])$importance %>% 
+    round(2) %>% 
+    mutate(variable = rownames(.)) %>% 
+    arrange(desc(Overall)) %>%
+    mutate(hypothesis = case_when(variable %in% H1_vars ~ "H1",
+                                variable %in% H2_vars ~ "H2",
+                                variable %in% H3_vars ~ "H3",
+                                variable %in% H4_vars ~ "H4",
+                                startsWith(variable, "dataset") ~ "H4",
+                                TRUE ~ "H1"))
+
+importances_wide_J %>% kableExtra::kable()
+```
+
+## Log Ratio
+
+```{r}
+#| eval: true
+# Log Ratio 
+
+
+## Ranger =====
+saved_models[[2]]$finalModel
+saved_models[[2]]$results
+plot( saved_models[[2]])
+
+
+## Importance frame (wide format) ===
+importances_wide_LR <- varImp(saved_models[[2]])$importance %>% 
+    round(2) %>% 
+    mutate(variable = rownames(.)) %>% 
+    arrange(desc(Overall)) %>%
+    mutate(hypothesis = case_when(variable %in% H1_vars ~ "H1",
+                                variable %in% H2_vars ~ "H2",
+                                variable %in% H3_vars ~ "H3",
+                                variable %in% H4_vars ~ "H4",
+                                startsWith(variable, "dataset") ~ "H4",
+                                TRUE ~ "H1"))
+
+importances_wide_LR %>% kableExtra::kable()
+
+
+```
+:::
+
+### Variable Importance from Final Model
+
+::: panel-tabset
+## Jaccard 1
+
+```{r}
+#| fig.height: 8
+#| fig.width: 8
+# Plot variable importances across models:
+ggplot(data = importances_wide_J, 
+       aes(y = forcats::fct_reorder(variable, Overall), x = Overall, fill = hypothesis))+
+  geom_col()+
+  theme_classic()+
+  labs(y = NULL, x = "Scaled Predictor Importance (%)", title = "J")+ 
+   scale_fill_manual(values = c("#e66101", "#fdb863", "#b2abd2", "#5e3c99")) +
+  common_theme
+export::graph2ppt(file = paste0(out_path, "Figures/B2_MachineLearning/B_03_importances_J_Bars_finalModel.ppt"), width = 8, height = 8)
+```
+
+## Log Ratio 1
+
+```{r}
+#| fig.height: 12
+#| fig.width: 8
+# Plot variable importances across models:
+ggplot(data = importances_wide_LR, 
+       aes(y = forcats::fct_reorder(variable, Overall), x = Overall, fill = hypothesis))+
+  geom_col()+
+  theme_classic()+
+  labs(y= NULL, x = "Scaled Predictor Importance (%)", title = "Log Ratio AOO")+ 
+  #scale_fill_manual(values = c("seagreen3", "mediumpurple", "darkorange", "gold"))+
+   scale_fill_manual(values = c("#e66101", "#fdb863", "#b2abd2", "#5e3c99")) +
+  common_theme
+export::graph2ppt(file = paste0(out_path, "Figures/B2_MachineLearning/B_03_importances_LR_Bars_finalModel.ppt"), width = 8, height = 12)
+
+```
+:::
+
+# Resamples across models:
+
+::: panel-tabset
+## Performance across 10 resamples
+
+```{r}
+#| warning: false
+#| message: false
+## Jaccard 1
+# Create resamples for each model
+resamps <- resamples(list(
+  Jaccard = saved_models[[1]],
+  LogRatio = saved_models[[2]]))
+
+# Plot the resampled error rates for each model
+dotplot_resamps <- dotplot(resamps)
+
+# Summarize the resamples
+summary_resamps <- summary(resamps)
+
+
+resamples_all <-list(
+    resamps = resamps,
+    Dotplot = dotplot_resamps, # store the dotplot object
+    Summary = summary_resamps)  # store the summary object
+
+
+resamples_all
+```
+:::
+
+```{r}
+ save.image("../../Data/RData/B_03_reduced_hyper_para_tuning_all_models.RData")
+```

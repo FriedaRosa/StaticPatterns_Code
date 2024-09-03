@@ -1,0 +1,532 @@
+---
+title: "Script 2 - Recursive Feature Selection"
+date: "2023-05-29"
+---
+
+# Recursive feature elimination
+
+I will use recursive feature elimination to reduce the dimensionality of the data by removing variables that do not lead to an increase of model performance when included.
+I will apply this method, because most of my predictors were calculated from the same data and are thus not independent.
+Although checking for high correlations in one of the previous steps, any correlations between predictor variables may confuse the model during variation partitioning, as correlations make it impossible to discern which variable explains how much of the variation.
+This also reduces the probability of overfitting the model to the data as redundant features with correlated noise signals are removed.
+
+The method being used relies on the `randomForest` package to recursively eliminate one predictor after another from the model, calculate the variable importance, rank these, average the importance across resamples and comparing the fit across models with different subsets of the set of predictors.
+The workflow is set in the `caret` helper function `rfFuncs()`.
+
+::: panel-tabset
+## Source custom functions
+
+```{r}
+#| label: load-packages
+#| message: FALSE
+#| warning: FALSE
+rm(list = ls())
+source("../src/B_config.R")
+source("../src/functions.R")
+load("../../Data/RData/B_01_Data_prep.RData") # before rfe
+
+
+rm(pckgs,cor_vars, file_path, cor_df, data_list, processed_data, correlation_matrix, p.mat, recipe_pp_J, recipe_pp_LR, recipe_pp_prepped_J, recipe_pp_prepped_LR)
+
+
+
+# This one as everything from below: (after rfe)
+load("../../Data/RData/B_02_rfe_full_vs_reduced.RData")
+```
+:::
+
+### Predictor importance / Recursive Feature Selection
+
+We will set up a loop that runs through the four response variables that I am investigating.
+The models from which the variable importance is calculated are run for 5000 trees each across 10 resamples.
+Again I will be using 10-fold repeated cross-validation with 3 repeats to evaluate the performance of the models.
+
+```{r}
+#| eval: false
+#| label: rfe-loop
+
+
+
+saved_profiles <- replicate(2, list())
+save_imp <- replicate(2, list())
+response_list <- c("Jaccard", "log_R2_1")
+
+for(j in seq_along(1:2)){
+  
+  
+  ## Loop through differet datasets/Analyses
+  dat_train <- dat_train_list[[j]]
+  response <- response_list[[j]] 
+  saved_profiles[[j]] <- replicate(2, list())
+  save_imp[[j]] <- replicate(2, list())
+    
+  
+  ## Set variables for recursive feature elimination
+  subsets <- c(1:39) # number of predictors in each run
+  x <- dat_train %>% select(!all_of(response))
+  y <- dat_train %>% pull(response)
+  
+  
+  ## Recursive feature selection:
+  set.seed(42)
+  ctrl <- rfeControl(
+    functions = rfFuncs,
+    method = "repeatedcv",
+    number = 10,
+    repeats = 3,
+    returnResamp = "all", # we need all resamples
+    verbose = TRUE,
+    saveDetails = TRUE)
+  ctrl$functions$rank <- rank #adjust rank function
+
+  
+
+  ## Recursive Feature Eliminiation ======================= ####
+  set.seed(42)
+  rfProfile <- rfe(x, y,  sizes = subsets, rfeControl = ctrl)
+  rfProfile
+  
+  saveRDS(rfProfile, paste0(out_path, "rds/B_02_rfProfile_", j, ".rds"))
+    
+  # Extract most important predictors ======================= ####
+  
+  imp <- as.data.frame(rfProfile$fit$importance) %>%
+                   round(3) %>%
+                   select(IncNodePurity) %>% 
+                   mutate(var = row.names(.)) %>%
+                   arrange(desc(IncNodePurity))    
+    
+  saved_profiles[[j]] <- rfProfile
+  save_imp[[j]] <- imp
+  
+
+  }
+
+rm(j, y, x, i, combi, Fig1, Fig2, responses, imp, res, rfe_res, subsets, ctrl, rfProfile)
+saveRDS(saved_profiles, file = paste0(out_path, "rds/B_02_rfe_profiles.rds"))
+save.image(file =  paste0(out_path, "RData/B_02_rfe.RData"))
+
+```
+
+```{r}
+#| label: rfe-results-eval
+#| fig.height: 4
+#| fig.width: 4
+#| eval: true
+#| warning: false
+
+detach("package:plyr", unload = TRUE)
+
+load(paste0(out_path, "RData/B_02_rfe.RData"))
+rfProfile_J <- readRDS(paste0(out_path, "rds/B_02_rfProfile_1.rds"))
+rfProfile_LR <- readRDS(paste0(out_path, "rds/B_02_rfProfile_2.rds"))
+
+rfProfile_J$bestSubset
+rfProfile_LR$bestSubset
+
+
+results <- replicate(2, list())
+    for (i in seq_along(1:2)){
+        resamp_res <- saved_profiles[[i]]
+        res <- slice_min(resamp_res$results, RMSE)
+        results[[i]] <- res
+    }
+
+names(results) <- c("J1",  "LR1")
+rfe_res <- do.call(rbind, results)
+rfe_res$dd <- as.factor(rownames(rfe_res))
+
+
+# Bar plot: Nr. Vars selected for each analysis 
+ggplot(data = rfe_res, aes(x = dd, y = Variables)) +
+    geom_col(fill = "lightgrey") +
+    geom_point(data = rfe_res %>% group_by(dd) %>% dplyr::summarize(mean_Variables = mean(Variables)), 
+    aes(x = dd, y = mean_Variables), color = "red") +
+    common_theme+
+    labs(title = "Number of variables selected per analysis", y = "Number of variables selected", x = "Analysis")
+
+
+
+
+```
+
+```{r}
+
+# Add mean importance across resamples to results
+rfProfile_J$variables <- rfProfile_J$variables %>% 
+  ungroup() %>%
+  filter(Variables == 38) %>%
+  group_by(var) %>%
+  dplyr::mutate(Overall_mean_resamp = mean(Overall)) %>%
+  dplyr::mutate(hypo = case_when(var %in% H1_vars ~ "H1",
+                          var %in% H2_vars ~ "H2",
+                          var %in% H3_vars ~ "H3",
+                          var %in% H4_vars ~ "H4"))
+
+
+
+rfProfile_LR$variables <- rfProfile_LR$variables %>% 
+  filter(Variables == 38) %>%
+  group_by(var) %>%
+  dplyr::mutate(Overall_mean_resamp = mean(Overall))%>%
+  dplyr::mutate(hypo = case_when(var %in% H1_vars ~ "H1",
+                          var %in% H2_vars ~ "H2",
+                          var %in% H3_vars ~ "H3",
+                          var %in% H4_vars ~ "H4"))
+```
+
+::: panel-tabset
+## Jaccard
+
+The following plots show, that the data that can be used to predict Jaccard can be reduced enormously without losing predictive performance.
+
+For *`Jaccard1`* the
+
+-   reduced model yields: RMSE = 0.1116 and R² = 0.8450,
+
+-   while the full model yields: RMSE = 0.1118 and R² = 0.8455.
+
+showing even a slightly reduced RMSE compared to the full model.
+
+For Jaccard 2 the
+
+-   reduced model yields: RMSE = 0.1248 and R² = 0.8077,
+
+-   while the full model yields: RMSE = 0.1273 and R² = 0.8022.
+
+```{r}
+#| label: rfe-results-boxplot-j
+#| fig.height: 8
+#| fig.width: 10
+#| eval: true
+#| warning: false
+
+# On best models (best hyper parameters)
+rfProfile_J$fit 
+rfProfile_J$fit %>% varImp()
+plot(rfProfile_J)
+
+
+rfProfile_LR$fit
+rfProfile_LR$fit %>% varImp()
+plot(rfProfile_LR)
+
+## Plot the importances
+
+rfProfile_J$variables %>% filter(Variables == 38) %>%
+  group_by(var) %>%
+  
+  ggplot()+
+    geom_rect(aes(xmin = -Inf, 
+                  xmax = Inf, 
+                  ymin = -Inf, 
+                  ymax = (38.5-rfProfile_J$bestSubset)), 
+              fill = "lightgray", alpha = 0.9) +
+    geom_boxplot(aes(y = reorder(var, Overall), 
+                     x = Overall, 
+                     fill = hypo ),
+                 show.legend = FALSE)+
+  #geom_point(aes(x = Overall_mean_resamp, y = var), col = "red", alpha = 0.4)+
+  
+    common_theme +
+    xlim(0,100)+
+    scale_fill_manual(values = c("#e66101", "#fdb863", "#b2abd2", "#5e3c99")) +
+    labs(title = "Variables by Importance: Jaccard tp = 1", 
+         x = "Importance", 
+         y = "Variable")
+
+
+
+```
+
+```{r}
+#| fig.width: 16
+#| fig.height: 10
+
+
+Fig2 <- rfProfile_LR$variables %>% 
+  filter(Variables == 38) %>%
+  group_by(var) %>%
+  
+  ggplot()+
+    geom_rect(aes(xmin = -Inf, 
+                  xmax = Inf, 
+                  ymin = -Inf, 
+                  ymax = (38.5-rfProfile_LR$bestSubset)), 
+              fill = "lightgray", 
+              alpha = 0.9) +
+    geom_boxplot(aes(y = reorder(var, Overall), 
+                     x = Overall, 
+                     fill = hypo ), 
+                 show.legend = FALSE,)+
+  common_theme+
+  theme(axis.text.y = element_text(size = 10))+
+  xlim(0,100)+
+  scale_fill_manual(values = c("#e66101", "#fdb863", "#b2abd2", "#5e3c99")) +
+  labs(title = "Variables by Importance: log ratio tp = 1", 
+       x = "Importance", 
+       y = "Variable")
+  
+Fig1 <- rfProfile_J$variables %>% 
+  filter(Variables == 38) %>%
+  group_by(var) %>%
+  
+  ggplot()+
+    geom_rect(aes(xmin = -Inf, 
+                  xmax = Inf, 
+                  ymin = -Inf, 
+                  ymax = (38.5-rfProfile_J$bestSubset)), 
+              fill = "lightgray", alpha = 0.9) +
+    geom_boxplot(aes(y = reorder(var, Overall), 
+                     x = Overall, fill = hypo ), 
+                 show.legend = FALSE)+
+  common_theme+
+  theme(axis.text.y = element_text(size = 10))+
+  xlim(0,100)+
+  scale_fill_manual(values = c("#e66101", "#fdb863", "#b2abd2", "#5e3c99")) +
+  labs(title = "Variables by Importance: Jaccard tp = 1", 
+       x = "Importance", 
+       y = "Variable")
+
+
+export::graph2ppt(Fig1, paste0(out_path, "Figures/B2_MachineLearning/B_02_rfe_importance_J.ppt"))
+export::graph2ppt(Fig2, paste0(out_path, "Figures/B2_MachineLearning/B_02_rfe_importance_LR.ppt"))
+  
+```
+
+## Log Ratio
+
+For `log ratio of AOO,` we can see that we need more predictors than for `Jaccard` to predict it from the data.
+As expected before, the model performance is generally low (both R² = 0.147) and the models try to include more information to discern the relationship between predictors and the response that does not capture a big signal from temporal change.
+
+```{r}
+#| label: rfe-results-boxplot-lr
+#| fig.height: 8
+#| fig.width: 10
+#| eval: true
+#| warning: false
+
+# On best models (best hyper parameters)
+rfProfile_LR$fit 
+rfProfile_LR$fit %>% varImp()
+plot(rfProfile_LR)
+
+
+rfProfile_LR$variables %>% 
+  filter(Variables == 38) %>%
+  group_by(var) %>%
+  
+  ggplot()+
+  geom_rect(aes(xmin = -Inf, 
+                xmax = Inf, 
+                ymin = -Inf, 
+                ymax = (38.5-rfProfile_LR$bestSubset)), 
+            fill = "lightgray", 
+            alpha = 0.9) +
+  geom_boxplot(aes(y = reorder(var, Overall), 
+                   x = Overall, 
+                   fill = hypo ), 
+               show.legend = FALSE)+
+  geom_point(aes(x = Overall_mean_resamp, 
+                 y = var), 
+             col = "red", 
+             alpha = 0.4)+
+  common_theme+
+  xlim(0,100)+
+  scale_fill_manual(values = c("#e66101", "#fdb863", "#b2abd2", "#5e3c99")) +
+  labs(title = "Variables by Importance: log ratio tp = 1", x = "Importance", y = "Variable")
+
+```
+:::
+
+```{r}
+Imp_list <- replicate(2, list())
+Imp_list[[1]] <- rfProfile_J$variables %>% 
+  select(Overall_mean_resamp, var) %>%
+  rename("imp" = "Overall_mean_resamp") %>%
+  mutate(model = "J")
+
+
+Imp_list[[2]] <- rfProfile_LR$variables %>%
+  select(Overall_mean_resamp, var) %>%
+  rename("imp" = "Overall_mean_resamp")%>%
+  mutate(model = "LR")
+
+
+
+# Included vars:
+J_vars <- rfProfile_J$fit$importance
+LR_vars <- rfProfile_LR$fit$importance
+
+Imp_df <- do.call(rbind, Imp_list)
+wide <- Imp_df %>%
+  tidyr::pivot_wider(names_from = c(model), 
+                     values_from = imp, names_sep = "_", 
+                     values_fn = mean) %>% 
+  arrange(desc(J)) %>% 
+  group_by(var) %>%  
+  mutate(hypo = case_when(var %in% H1_vars ~ "H1",
+                          var %in% H2_vars ~ "H2",
+                          var %in% H3_vars ~ "H3",
+                          var %in% H4_vars ~ "H4")) %>%
+  mutate(Include_J = case_when(var %in% c(row.names(J_vars)) ~ 1, 
+         .default = 0), 
+         Include_LR = case_when(var %in% c(row.names(LR_vars)) ~ 1, 
+         .default = 0))
+wide %>% write.csv("../../Data/csv/B_02_rfe_var_imp.csv")
+wide %>% kableExtra::kable()
+```
+
+# Compare reduced and full ranger models
+
+Since the rfe function works with the randomForest package, we will check if we get similarly better results with ranger and the reduced model.
+::: panel-tabset \## Jaccard 1
+
+```{r}
+#| label: compare-ranger-results-J1
+#| eval: false
+
+J_vars <- wide %>% filter(Include_J == 1) %>% pull(var)
+
+response <- "Jaccard"
+
+indices <- indices10
+
+dat_train <- dat_train_J
+
+
+# Define training control ==========================================================
+trainControl <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 3,
+  savePredictions = "final",
+  returnResamp = "all",
+  verboseIter = FALSE,
+  index = indices)
+
+  ## Train ranger model ==========================================================
+set.seed(42)
+tictoc::tic("ranger")
+  J_full <- train(
+    as.formula(paste(response, "~ .")),
+    data = dat_train,
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 5000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 20)
+tictoc::toc() # 12 min
+  
+set.seed(42)
+tictoc::tic("ranger")
+  J_reduced <- train(
+    as.formula(paste(response, "~ .")),
+    data = dat_train %>% select(response, all_of(J_vars)),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 5000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 20)
+  
+tictoc::toc()
+J_full$finalModel
+J_full$results
+J1_reduced$finalModel
+
+J_full$finalModel$r.squared
+J1_reduced$results
+
+
+```
+
+## Log Ratio 1
+
+```{r}
+#| label: compare-ranger-results-LR1
+#| eval: false
+
+LR_vars <- wide %>% filter(Include_LR == 1) %>% pull(var)
+response <- "log_R2_1"
+indices <- indices10
+dat_train <- dat_train_LR
+
+
+# Define training control ==========================================================
+trainControl <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 3,
+  savePredictions = "final",
+  returnResamp = "all",
+  verboseIter = FALSE,
+  index = indices)
+
+## Train ranger model ==========================================================
+set.seed(42)
+tictoc::tic("ranger")
+LR_full <- train(
+  as.formula(paste(response, "~ .")),
+  data = dat_train,
+  method = "ranger",
+  trControl = trainControl,
+  importance = "permutation",
+  scale.permutation.importance = TRUE,
+  num.trees = 5000,
+  respect.unordered.factors = TRUE,
+  oob.error = TRUE,
+  tuneLength = 20)
+  
+set.seed(42)
+tictoc::tic("ranger")
+LR_reduced <- train(
+  as.formula(paste(response, "~ .")),
+  data = dat_train %>% select(response, all_of(LR_vars)),
+  method = "ranger",
+  trControl = trainControl,
+  importance = "permutation",
+  scale.permutation.importance = TRUE,
+  num.trees = 5000,
+  respect.unordered.factors = TRUE,
+  oob.error = TRUE,
+  tuneLength = 20)
+
+tictoc::toc()
+LR_full$finalModel
+LR_full$results
+LR_reduced$finalModel #better
+LR_reduced$results
+
+final_ranger_list <- list(J_reduced, LR_reduced)
+```
+
+```{r}
+selected_predictors <- list(J_vars,  LR_vars)
+saveRDS(selected_predictors, "../../Data/rds/B_02_selected_predictors_list.rds")
+saveRDS(final_ranger_list, paste0(out_path, "rds/B_02_Final_ranger_list_reduced.rds"))
+
+save.image("../../Data/RData/B_02_rfe_full_vs_reduced.RData")
+```
+
+```{r}
+
+final_ranger_list
+caret::varImp(final_ranger_list[[1]])$importance %>% 
+    round(2) %>% 
+    mutate(var = rownames(.)) %>% 
+    arrange(desc(Overall)) %>% 
+    rename("Imp_J" = "Overall")
+  
+  
+caret::varImp(final_ranger_list[[2]])$importance %>% 
+    round(2) %>% 
+    mutate(var = rownames(.)) %>% 
+    arrange(desc(Overall)) %>% 
+    rename("Imp_LR" = "Overall")
+```

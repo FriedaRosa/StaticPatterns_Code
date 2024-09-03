@@ -1,0 +1,658 @@
+---
+title: "Atlas Data Clean"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+
+# Change Maps for each Atlas
+
+-   we will use the raw data
+
+-   we will use the highest resolution
+
+## Libraries
+
+```{r}
+rm(list=ls())
+library(sf);  sf_use_s2(FALSE)
+library(dplyr);
+library(rstatix);
+library(ggplot2);
+library(rnaturalearth)
+gc()
+
+```
+
+## General Variables
+
+```{r}
+# Important vectors  =================================================
+time_periods <- c(1,2)
+atlas_names <- c("Birds_Atlas_Czechia", "Birds_Atlas_New_York","Birds_atlas_Japan", "Birds_atlas_EBBA")
+atlas_names_short <- c("Czechia", "NewYork", "Japan", "Europe")
+crs_list <- c("epsg:5514", "epsg:32118", "epsg:6684", "epsg:3035") # CZ, NY, JP, EBBA
+
+
+### The paths =================================================
+source_atlas <- c("c:/Users/wolke/OneDrive - CZU v Praze/Datasets/Processed/Atlases/Replicated/")
+source_Git <- c("c:/Users/wolke/OneDrive - CZU v Praze/Dokumenty/GitHub/StaticPredictors_Woelke_et_al_2024/Results/Figures/A1_Maps/")
+
+## Folders to save figures/maps:
+out_paths <- c(paste0(source_Git, "CZ/"),
+               paste0(source_Git, "NY/"),
+               paste0(source_Git, "JP/"),
+               paste0(source_Git, "EBBA/"),
+               paste0(source_Git, "Extremes/"))
+
+# folder path to atlas data
+source_paths <- c(
+  paste0(source_atlas, "Birds_Atlas_Czechia/"),
+  paste0(source_atlas, "Birds_Atlas_New_York/"),
+  paste0(source_atlas, "Birds_atlas_Japan/"),
+  paste0(source_atlas, "Birds_atlas_EBBA/")
+)
+
+# create path to read in data and grids from variables
+data_paths <- c(paste0(source_paths[1],"Birds_Atlas_Czechia_beast_data.rds"), 
+                paste0(source_paths[2], "Birds_Atlas_New_York_beast_data.rds"), 
+                paste0(source_paths[3], "Birds_atlas_Japan_beast_data.rds"),
+                paste0(source_paths[4], "Birds_atlas_EBBA_beast_data_CHANGE.rds"))
+
+grid_paths <- c(
+  paste0(source_paths[1], "Birds_Atlas_Czechia_grid.gpkg"),
+  paste0(source_paths[2], "Birds_Atlas_New_York_grid.gpkg"),
+  paste0(source_paths[3], "Birds_atlas_Japan_grid.gpkg"),
+  paste0(source_paths[4], "Birds_atlas_EBBA_grid.gpkg")
+)
+
+
+
+```
+
+## Species per Grid Cell data
+
+```{r}
+#| eval: false
+# Here we create objects: dat and grids
+
+grids <- list()
+df_list <- list()
+presence_sf_list <- list()
+not_samp_list <- list()
+
+for (a in seq_along(data_paths)){
+  
+  # I. Read Grids ( 1x1 grid - highest resolution) :
+    grids_a <- sapply("cell1grid", function(i) {
+      st_read(grid_paths[[a]], paste(i), quiet = TRUE) %>% 
+        st_transform(crs = crs_list[a]) 
+      }, simplify = FALSE)
+    
+    grids_a <- grids_a$cell1grid %>%
+      mutate(atlas_cell_repeated = case_when(area1s != 0 & area2s != 0 ~ 2,
+                                       (area1s != 0 & area2s == 0) | (area1s == 0 & area2s != 0) ~ 1,
+                                       area1s == 0 & area2s == 0 ~ 0,
+                                       .default = NA)) 
+    
+    grids_a$atlas_cell_repeated <- as.factor(grids_a$atlas_cell_repeated)
+    grids_a$cell_grouping <- NULL
+    
+    
+
+    
+    # II. Read Presence data (1x1 grid - highest resolution)
+    pres_dat <- readRDS(data_paths[a]) %>% filter(cell_grouping == "1")
+    pres_dat$cell_grouping <- NULL
+    sy <- sort(unique(pres_dat$start_year))
+    
+    pres_dat2 <- pres_dat %>%     
+      ungroup() %>%
+      
+      # Add time-period column
+      mutate(tp = case_when(start_year == sy[1] ~ 1, 
+                            start_year == sy[2] ~ 2)) %>% 
+      filter(tp %in% c(1,2)) %>%
+      select(dataset, tp,
+             cell_label, cell_lat, cell_long, area, 
+             verbatim_name) 
+  
+    ## Filter level 1: Cells sampled twice 
+    common_cells <- pres_dat2 %>% 
+      ungroup() %>% 
+      distinct(dataset, cell_label, tp) %>% 
+      group_by( cell_label) %>%
+    # How often each cell was sampled:
+      mutate(
+        num_periods_cells_data = n_distinct(tp)) %>% 
+      select(cell_label, num_periods_cells_data, dataset) %>% 
+      distinct()
+  
+    # Merge 
+    presence_data_rep <- full_join(pres_dat2, common_cells)
+    
+    
+    # get sampled and not sampled cells
+    all_cells_data <- presence_data_rep %>% 
+      filter(num_periods_cells_data == 2) %>% 
+      distinct(cell_label) %>% 
+      pull(cell_label)
+    
+    all_cells_atlas <- grids_a %>% 
+      distinct(cell_label) %>% 
+      pull(cell_label)
+    
+    not_sampled <- setdiff(all_cells_atlas, all_cells_data) # List of cells not sampled
+    not_samp_list[[a]] <- not_sampled
+    
+    # Make column in grid data for it:
+    
+    grids_a <- grids_a %>%
+      mutate(sampled = factor(
+               case_when(
+                 cell_label %in% not_sampled ~ 0,
+                 cell_label %in% all_cells_data ~ 1
+               )))
+    
+    
+    grids_a <- grids_a %>% select( cell_label, cell_long, cell_lat, sampled)
+    grids[[a]] <- grids_a
+    
+    colSums(is.na(grids_a)) # No NAs
+    
+    ##################################################################################
+
+    ## Filter level 2: Species sampled twice in the remaining cells
+    common_sp <- presence_data_rep %>% 
+      filter(num_periods_cells_data == 2) %>% 
+      group_by(dataset, verbatim_name) %>%
+      summarise(num_periods_sp_data = n_distinct(tp))
+
+    # Merge 
+    presence_data <- full_join(presence_data_rep, common_sp)  
+  
+    # Save Data to List ====
+    df_list[[a]] <- presence_data
+
+    ##################################################################################  
+
+    # Merge presence data to grid
+    
+    presence_sf <- full_join(grids[[a]], presence_data %>% 
+                               select(dataset, tp, cell_label, cell_lat, cell_long, verbatim_name)) %>% 
+      mutate(dataset = case_when(is.na(dataset) ~ unique(presence_data$dataset),
+                                 !is.na(dataset) ~ dataset))
+    
+    colSums(is.na(presence_sf)) # NAs = cells not sampled
+  
+    # Save species presece sf to list
+    presence_sf_list[[a]] <- presence_sf
+    
+    
+    }
+
+
+# Loop postprocessing ============================================================================== ## 
+presence_data_all <- df_list
+sp_cell_dat <- plyr::rbind.fill(presence_data_all)
+names(presence_sf_list) <- atlas_names
+
+
+# Quick plot:
+ggplot()+
+  geom_sf(data = presence_sf_list[[1]], aes(fill = sampled))
+ggplot()+
+  geom_sf(data = presence_sf_list[[2]], aes(fill = sampled))
+ggplot()+
+  geom_sf(data = presence_sf_list[[3]], aes(fill = sampled))
+ggplot()+
+  geom_sf(data = presence_sf_list[[4]], aes(fill = sampled))
+
+
+# Save output to rds
+saveRDS(presence_sf_list, "../../Data/rds/C_1_presence_sf_list2.rds")
+saveRDS(grids, "../../Data/rds/C_1_grids_changeMaps.rds")
+```
+
+## Species data / Trends
+
+```{r}
+## Species Occupancy Data: (on Grid Cell level)
+# dat <- presence_sf_list
+dat <- readRDS("../../Data/rds/C_1_presence_sf_list2.rds")
+grids <- readRDS("../../Data/rds/C_1_grids_changeMaps.rds")
+
+# Save individual grids for plotting =====
+names(grids) <- atlas_names
+grid_CZ <- grids[[1]]  %>% select(cell_label, cell_long, cell_lat, sampled)
+grid_NY <- grids[[2]]  %>% select(cell_label, cell_long, cell_lat, sampled)
+grid_JP <- grids[[3]]  %>% select(cell_label, cell_long, cell_lat, sampled)
+grid_EU <- grids[[4]]  %>% select(cell_label, cell_long, cell_lat, sampled)
+
+
+## Species Trends Data: (on Species Level)
+# Combined trends: Jaccard ~ Log Ratio to select interesting species to visualize:
+
+trends <- read.csv("../../Data/csv/B_06_Predictions_RankedList_ALL.csv") %>% 
+  select(dataset, verbatim_name, J_Observed, LR_Observed, trend_J_Observed, trend_LR_Observed) %>% 
+  mutate(Trend_comb = 
+           factor(
+             case_when(
+               trend_J_Observed %in% c("stable (> 0.9)") & trend_LR_Observed %in% c("stable") ~ "stable",
+               trend_J_Observed %in% c("complete turnover (< 0.1)") & trend_LR_Observed %in% c("stable") ~ "dynamic but stable",
+               trend_LR_Observed %in% c("strong increase (> doubling)")  ~ "strong increase" ,
+               trend_LR_Observed %in% c("strong decrease (> halfing)")  ~ "strong decrease",
+               TRUE ~ "intermediate")
+             )
+         )
+
+## Read Fractal Dimension Data
+FracD <- readRDS("../../Data/rds/A_3_AllPredictors_new.rds") %>% 
+  distinct(dataset, tp, verbatim_name, D_AOO_a, AOO, IUCN, rel_occ_Ncells) %>%
+  full_join(trends)
+
+# Convert the log ratios and Jaccard to factor variables based on the ranges
+FracD$trend_LR <- FracD$trend_LR_Observed
+FracD$trend_J <- FracD$trend_J_Observed
+
+FracD$trend_LR_Observed <- NULL
+FracD$trend_J_Observed <- NULL
+names(FracD)
+```
+
+## Retrieve Data: Country borders
+
+```{r}
+# Create a buffer around the bounding box
+bbox_EU <- st_bbox(grid_EU)
+buffered_bbox <- st_buffer(grid_EU, dist = 15)
+
+
+## Get the Borders for plotting =====
+EU <- ne_countries(continent = "europe", scale = 10, returnclass='sf') %>% 
+  st_transform(st_crs(grid_EU)) %>%
+  st_crop(buffered_bbox)
+TK <- ne_countries(country = "turkey", scale = 10, returnclass='sf') %>% 
+  st_transform(st_crs(grid_EU))
+
+EU2 <- rbind(EU, TK)
+
+CZ <- ne_countries(country = "czechia", scale = 10,  returnclass='sf') %>%  
+  st_transform(st_crs(grid_CZ)) %>% 
+  st_crop(st_bbox(grid_CZ))
+
+JP <- ne_countries(country = "japan", scale = 10, returnclass='sf') %>%  
+  st_transform(st_crs(grid_JP)) %>% 
+  st_crop(st_bbox(grid_JP))
+
+# Load world map data
+USA <- ne_states(returnclass = "sf", country = 'United States of America') 
+NY <- USA[USA$name == "New York", ] %>% 
+  st_transform(st_crs(grid_NY))
+NY <- NY  %>% 
+  st_crop(st_bbox(grid_NY)) 
+
+## List with country borders:
+countries_list <- list(CZ, NY, JP, EU2)
+names(countries_list) <- names(dat)
+
+plot(countries_list[[1]][1])
+plot(countries_list[[2]][1])
+plot(countries_list[[3]][1])
+plot(countries_list[[4]][1])
+
+```
+
+## Calculate Change per Cell per Species
+
+```{r, eval = F, include = T}
+
+# Initialize lists to store results
+change_list_atlas <- list()
+change_list_sp <- list()
+
+for (a in seq_along(dat)){
+  
+  
+  
+  
+  # Subset for one atlas and reduce columns
+  atlas1 <- dat[[a]] %>% 
+    select(cell_label, dataset, cell_lat, cell_long, verbatim_name, tp, sampled)
+  atlas_name1 <- unique(atlas1$dataset)
+  
+  # Create a data frame with all unique grid cells
+  all_cells <- atlas1 %>% filter(dataset == atlas_name1) %>%
+    select(cell_label, cell_lat, cell_long, dataset) %>% 
+    unique()
+  
+  # Species list for one atlas to loop through
+  sp_list <- unique(atlas1$verbatim_name) %>% 
+    na.omit()
+  
+  
+  
+  
+  
+  for (sp in seq_along(sp_list)){
+    species_name <- sp_list[sp]
+    
+    # Subset for one species and keep all cells
+    atlas1sp <- all_cells %>% 
+      left_join(
+        atlas1 %>% st_drop_geometry() %>%
+          filter(verbatim_name == species_name) %>% 
+          select(cell_label, tp, sampled),
+        by = "cell_label"
+      ) %>% filter(dataset == atlas_name1)
+    
+    # Cells occupied in tp 1
+    cells1 <- atlas1sp %>% 
+      filter(sampled == 1 & tp == 1) %>%
+      pull(cell_label) %>% 
+      unique()
+    
+    # Cells sampled in tp 2
+    cells2 <- atlas1sp %>% 
+      filter(sampled == 1 & tp == 2) %>% 
+      pull(cell_label) %>% 
+      unique()
+    
+    # Classify cells by: stable, colonized, extinct
+    stable <- intersect(cells1, cells2)
+    colonized <- setdiff(cells2, cells1)
+    extinct <- setdiff(cells1, cells2)
+    not_sampled <- atlas1 %>% filter(sampled == 0) %>% pull(cell_label)
+    not_occupied <- setdiff(all_cells$cell_label, c(stable, colonized, extinct, not_sampled))
+    
+    # Make new data with merged TP with change column
+    change <- all_cells %>% 
+      mutate(
+        verbatim_name = species_name,
+        dataset = atlas_name1,
+        Change = factor(case_when(
+          cell_label %in% stable ~ "stable occupancy",
+          cell_label %in% colonized ~ "newly colonized",
+          cell_label %in% extinct ~ "newly extirpated",
+          cell_label %in% not_sampled ~ "Not Sampled",
+          cell_label %in% not_occupied ~ "Not Occupied",
+          TRUE ~ NA
+        ))
+      )
+    
+    change_list_sp[[sp]] <- change
+  
+  }
+
+  change_list_atlas[[a]] <- change_list_sp
+}
+names(change_list_atlas) <- atlas_names
+saveRDS(change_list_atlas, "../../Data/rds/C_1_ChangeDataSf.rds")
+
+
+# Color vector:
+colors <- setNames(
+  c("#574f7d", "#998ec3", "#f1a340", "#F7F7F7","lightgrey"), 
+  c("stable occupancy", "newly colonized", "newly extirpated", "Not Occupied", "Not Sampled"))
+
+# Test plot
+ggplot()+
+  geom_sf(data = change_list_atlas[[2]][["Actitis hypoleucos"]], aes(fill = Change), color = "lightgrey")+
+  scale_fill_manual(values = colors)+
+  theme_classic()+
+  theme(
+    axis.line = element_line(colour = "azure4", linetype = "solid"), 
+    axis.ticks = element_line(colour = "gray13"),
+    axis.title = element_text(size = 20),
+    axis.text = element_text(size = 16),
+    axis.text.x = element_text(vjust = 0.9, hjust = 0.9),
+    #plot.title = element_text(size = 16, face = "bold", hjust = 0.5, vjust = 2),
+    legend.position = "none")
+
+
+```
+
+### Read ChangeSf back in:
+
+```{r}
+change_sf2 <- readRDS("../../Data/rds/C_1_ChangeDataSf.rds")
+# save list of species and datasets 
+sp_list_all <- trends %>% 
+  distinct(dataset, verbatim_name)
+```
+
+## Plotting Options
+
+```{r}
+# Color vector:
+colors <- setNames(
+  c("#574f7d", "#998ec3", "#f1a340", "#F7F7F7","lightgrey"), 
+  c("stable occupancy", "newly colonized", "newly extirpated", "Not Occupied", "Not Sampled"))
+
+```
+
+## Maps for all species
+
+```{r}
+extremes <- FracD %>% 
+  filter(Trend_comb != "intermediate") %>% 
+  distinct(dataset, verbatim_name)
+
+# Loop through atlases and species and plot the change maps :) 
+for (atlas in seq_along(change_sf2)){
+  
+  change_1atlas <- change_sf2[[atlas]]
+  
+  
+    for (sp in seq_along(change_1atlas)){
+      
+      
+      atlas_sp <- change_sf2[[atlas]][[sp]] %>% unique()
+      species_name <- unique(atlas_sp$verbatim_name)
+      atlas_name <- unique(atlas_sp$dataset)
+      atlas_sp$Change <- as.factor(atlas_sp$Change)
+          
+          # Extract species-info for annotation 
+          D <- FracD %>% 
+            filter(verbatim_name == species_name & 
+                     dataset == atlas_name) %>%
+            pull(D_AOO_a) %>% 
+            unique()
+          
+          J <- FracD %>%
+            filter(verbatim_name == species_name & 
+                     dataset == atlas_name) %>%
+            pull(J_Observed) %>% 
+            unique()
+          
+          IUCN <- FracD %>%
+            filter(verbatim_name == species_name & 
+                     dataset == atlas_name) %>%
+            pull(IUCN) %>% 
+            unique()
+    
+          Prev <- FracD %>%      
+            filter(verbatim_name == species_name & 
+                     dataset == atlas_name) %>%
+            pull(rel_occ_Ncells) %>% 
+            unique()
+    
+          TrendLR <- FracD %>%
+            filter(verbatim_name == species_name & 
+                     dataset == atlas_name) %>%
+            pull(trend_LR) %>% 
+            unique()
+          
+          LR <- FracD %>%
+            filter(verbatim_name == species_name & 
+                     dataset == atlas_name) %>%
+            pull(LR_Observed) %>% 
+            unique()
+          
+          Trend_Both <- trends %>% 
+            filter(verbatim_name == species_name & 
+                     dataset == atlas_name) %>%
+            pull(Trend_comb) %>%
+            unique()
+  
+          
+          # Labels =
+          species_expr <- bquote(italic(.(species_name)))
+          atlas_expr <- atlas_name
+          title_expr <- bquote(.(species_expr) * " " * .(atlas_expr))
+          subtitle_expr <- paste("Trend LR = ", TrendLR, "\n", 
+                            "LR = ", LR, "\n", 
+                            "Jaccard = ", J,"\n",
+                            "FractD 1 = ", D[1], "\n", 
+                            "FractD 2 = ", D[2], "\n",
+                            "IUCN = ", IUCN, "\n",
+                            "Prevalence 1 = ", Prev[1], "\n",
+                            "Prevalence 2 = ", Prev[2])
+    
+    
+    # Plot the Map =
+    map <- ggplot() +
+      theme_void() +
+      geom_sf(data = atlas_sp, aes(fill = Change), col = "lightgrey")+
+      #geom_sf(data = species_sf, aes(fill = Change), col = "lightgrey") +
+      geom_sf(data = countries_list[[atlas]], col = "black", fill = NA) +
+      scale_fill_manual(values = colors,        
+                        drop = FALSE)+
+          labs(title = title_expr, subtitle = subtitle_expr)+
+      guides(fill = "legend")
+    
+    map
+
+    # Export to powerpoint vector file
+    export::graph2ppt(map, width=9, height=9,
+                      file=paste0(out_paths[atlas], 
+                                  #atlas_names_short[atlas],"_", 
+                                  "Prev_",
+                                  round(Prev[1],2), "_", 
+                                  round(Prev[2],2), "_",
+                                  gsub(" ", "_", Trend_Both),  "_",
+                                  gsub(" ", "_", unique(atlas_sp$verbatim_name)),
+                                  "_ChangeMap.pptx"))
+    
+        }
+    
+  }
+
+
+```
+
+# Make maps for all species in all Atlases:
+
+```{r}
+
+
+
+
+# Loop through atlases and species and plot the change maps :) 
+atlas = 3
+for (atlas in seq_along(atlas_names)){
+    for (sp in seq_along(change_sf2[[atlas]])){
+      
+      atlas_sp <- change_sf2[[atlas]][[sp]] %>% unique()
+      atlas_sp$Change <- as.factor(atlas_sp$Change)
+    
+    # Extract species-info for annotation =
+    D <- FracD %>% 
+      filter(verbatim_name == unique(atlas_sp$verbatim_name) & dataset == atlas_names[atlas]) %>%
+      pull(D_AOO_a) %>% 
+      unique()
+    J <- FracD %>%
+      filter(verbatim_name == unique(atlas_sp$verbatim_name) & dataset == atlas_names[atlas]) %>%
+      pull(J_Observed) %>% 
+      unique()
+    IUCN <- FracD %>%
+      filter(verbatim_name == unique(atlas_sp$verbatim_name) & dataset == atlas_names[atlas]) %>%
+      pull(IUCN) %>% 
+      unique()
+    Prev <- FracD %>%      
+      filter(verbatim_name == unique(atlas_sp$verbatim_name) & dataset == atlas_names[atlas]) %>%
+      pull(rel_occ_Ncells) %>% 
+      unique()
+    TrendLR <- FracD %>%
+      filter(verbatim_name == unique(atlas_sp$verbatim_name) & dataset == atlas_names[atlas]) %>%
+      pull(trend_LR) %>% 
+      unique()
+    LR <- FracD %>%
+      filter(verbatim_name == unique(atlas_sp$verbatim_name) & dataset == atlas_names[atlas]) %>%
+      pull(LR_Observed) %>% 
+      unique()
+  
+    
+    # Labels =
+    species_expr <- bquote(italic(.(unique(atlas_sp$verbatim_name))))
+    atlas_expr <- atlas_names[atlas]
+    title_expr <- bquote(.(species_expr) * " " * .(atlas_expr))
+    subtitle_expr <- paste("Trend LR = ", TrendLR, "\n", 
+                            "LR = ", LR, "\n", 
+                            "Jaccard = ", J,"\n",
+                            "FractD 1 = ", D[1], "\n", 
+                            "FractD 2 = ", D[2], "\n",
+                            "IUCN = ", IUCN, "\n",
+                            "Prevalence 1 = ", Prev[1], "\n",
+                            "Prevalence 2 = ", Prev[2])
+    
+    
+    # Plot the Map =
+    map <- ggplot() +
+      theme_void() +
+      geom_sf(data = atlas_sp, aes(fill = Change), col = "lightgrey")+
+      #geom_sf(data = species_sf, aes(fill = Change), col = "lightgrey") +
+      geom_sf(data = countries_list[[atlas]], col = "black", fill = NA) +
+      scale_fill_manual(values = colors,        
+                        drop = FALSE)+
+          labs(title = title_expr, subtitle = subtitle_expr)+
+      guides(fill = "legend")
+    
+    # Export to powerpoint vector file
+    export::graph2ppt(map, width=9, height=9,
+                      file=paste0(out_paths[atlas], atlas_names_short[atlas], 
+                                  gsub(" ", "_", unique(atlas_sp$verbatim_name)),"_incl_Quest_ChangeMap.pptx"))
+
+    
+    
+  }
+}
+
+
+```
+
+```{r}
+### Raw Atlas Maps:
+
+CZ <- ggplot()+
+  geom_sf(data = grids[[1]], col = "grey", fill = NA)+
+  geom_sf(size = 1.2) +
+   geom_sf(data = countries_list[[1]],  col = "black", fill = NA)+
+  theme_void() 
+
+NY <- ggplot()+
+  geom_sf(data = grids[[2]], col = "grey", fill = NA)+
+  geom_sf(size = 1.2) +
+   geom_sf(data = countries_list[[2]],  col = "black", fill = NA)+
+  theme_void() 
+
+JP <- ggplot()+
+  geom_sf(data = grids[[3]], col = "grey", fill = NA)+
+  geom_sf(size = 1.2) +
+   geom_sf(data = countries_list[[3]],  col = "black", fill = NA)+
+  theme_void() 
+
+EU <- ggplot()+
+  geom_sf(data = grids[[4]], col = "grey", fill = NA)+
+  geom_sf(size = 1.2) +
+  geom_sf(data = countries_list[[4]],  col = "black", fill = NA)+
+  theme_void() 
+
+gridExtra::grid.arrange(CZ, NY, JP, EU)
+```

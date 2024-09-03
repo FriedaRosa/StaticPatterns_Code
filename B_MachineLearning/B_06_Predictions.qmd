@@ -1,0 +1,515 @@
+# Tasks
+
+### - plot all variables that seem to be important for assessing change
+
+### - we seem to have a highly dimensional problem here.
+
+### - make a categorical variable for change and use this?
+
+### - maps with proportional change per cell??
+
+# Libraries
+
+```{r}
+rm(list = ls())
+source("../src/B_config.R")
+source("../src/functions.R")
+
+detach("package:plyr", unload = TRUE)
+library(ggplot2)
+library(grid)
+library(ggExtra)
+library(export)
+
+#install.packages("ggExtra")
+#install.packages("export")
+```
+
+
+# Data
+
+```{r}
+
+vars <- c(H1_vars, H2_vars, H3_vars, H4_vars)
+
+# Function 2: Pre-process the raw predictor data ============
+process_data <- function(dat, vars) {
+  dat <- dat %>%
+    filter(cell_grouping == 1) %>%
+    select(all_of(c("Jaccard", "log_R2_1", "tp", "verbatim_name", vars))) %>%
+    mutate(
+      D_AOO_a = case_when(
+        is.na(D_AOO_a) & rel_occ_Ncells > 0.97 ~ 2,
+        TRUE ~ D_AOO_a
+      ),
+      mean_prob_cooccur = case_when(
+        is.na(mean_prob_cooccur) & rel_occ_Ncells < 0.05 ~ 0,
+        TRUE ~ mean_prob_cooccur
+      )
+    ) %>%
+    filter(!is.na(moran)) %>%
+    mutate_if(is.character, as.factor) %>% 
+    mutate_at(vars(c(Habitat.Density, Migration)), as.factor)
+
+  return(dat)
+}
+
+
+```
+
+```{r}
+# Raw Predictors
+dat <- readRDS("../../Data/rds/A_3_AllPredictors_new.rds")
+
+# Preprocess data (similarly to previously to modelling)
+dat <- process_data(dat, vars)
+
+# Load models
+all_models <- readRDS(paste0(out_path, "rds/B_02_Final_ranger_list_reduced.rds"))
+
+# Predictions from the models:
+comp_df <- dat %>% filter(tp == 2) %>% select(-tp,  -Jaccard, -log_R2_1) %>% na.omit()
+comp_df$Jacc_pred <- round(predict(all_models[[1]], newdata = comp_df), 4)
+comp_df$LogRatio_pred <- round(predict(all_models[[2]], newdata = comp_df), 4)
+  
+comp_df %>% select(verbatim_name, dataset, Jacc_pred, LogRatio_pred)
+
+
+
+# Merge predictions to the data
+dat_mod <- full_join(comp_df, dat) %>%
+  mutate(Jaccard = case_when(tp == 2 ~ Jacc_pred, .default = Jaccard),
+         log_R2_1 = case_when(tp == 2 ~ LogRatio_pred, .default = log_R2_1)) %>%
+  select(dataset, tp, verbatim_name, log_R2_1, Jaccard)
+
+dat_mod %>% filter(tp == 2)
+
+# Remove unprocessed raw data to avoid confusions
+rm(dat)
+```
+
+# Pre-processing
+
+## Make categorical
+
+```{r}
+## Add trend column for plotting:
+# Define factor levels
+factor_levels_LR <- c("strong decrease (> halfing)", 
+                   "weak decrease (< halfing)", 
+                   "stable", 
+                   "weak increase (< doubling)", 
+                   "strong increase (> doubling)")
+# Define the cutoff points for the ranges in log scale
+cutoff_points_LR <- c(-Inf, log(0.5), log(0.9), log(1.1), log(2), Inf)
+
+# Define factor levels
+factor_levels_J <- c("complete turnover (< 0.1)",
+                     "strong turnover (0.1 - 0.25)",
+                     "strong intermediate turnover (0.25 - 0.5)", 
+                     "weak intermediate turnover (0.5 - 0.75)",
+                     "weak turnover (> 0.75)",
+                     "stable (> 0.9)")
+# Define the cutoff points for the ranges in log scale
+cutoff_points_J <- c(-Inf, 0.1, 0.25, 0.5, 0.75, 0.9, Inf)
+
+dat_cat <- dat_mod
+
+# Convert the log ratios and Jaccard to factor variables based on the ranges
+dat_cat$trend_LR <- cut(dat_cat$log_R2_1, breaks = cutoff_points_LR, labels = factor_levels_LR) 
+dat_cat$trend_J <- cut(dat_cat$Jaccard, breaks = cutoff_points_J, labels = factor_levels_J) 
+
+dat_cat <- dat_cat %>% 
+  rstatix::reorder_levels(trend_LR, factor_levels_LR) %>% 
+  rstatix::reorder_levels(trend_J, factor_levels_J) %>%
+  na.omit()
+
+dat_cat_wide <- dat_cat %>% 
+  tidyr::pivot_wider(id_cols = c(dataset, verbatim_name), 
+              names_from = tp, 
+              values_from = c(log_R2_1, trend_LR, Jaccard, trend_J))
+print(colnames(dat_cat_wide))
+lookup <- c(LR_Observed = "log_R2_1_1",
+           "trend_LR_Observed" = "trend_LR_1",
+           "LR_Predicted" = "log_R2_1_2", 
+           "trend_LR_Predicted" = "trend_LR_2",
+           "J_Observed" = "Jaccard_1", 
+           "trend_J_Observed" = "trend_J_1",
+           "J_Predicted" = "Jaccard_2",
+          "trend_J_Predicted" = "trend_J_2")
+dat_cat_wide <- dat_cat_wide %>%
+  dplyr::rename(all_of(lookup)) %>% 
+  arrange(dataset)
+
+```
+
+# Tables with Species Predictions Ranked
+
+```{r}
+names_data <- unique(dat_cat_wide$dataset)
+
+# Reorder columns 
+dat_cat_wide <- dat_cat_wide[, c("dataset", 
+                                 "verbatim_name", 
+                                 "J_Predicted", 
+                                 "trend_J_Predicted", 
+                                 "J_Observed", 
+                                 "trend_J_Observed", 
+                                 "LR_Predicted", 
+                                 "trend_LR_Predicted", 
+                                 "LR_Observed", 
+                                 "trend_LR_Observed")]
+
+## Czech Republic =========================================================== ##
+Czechia_df <- dat_cat_wide %>% 
+  filter(dataset == names_data[1]) %>%
+  ungroup() %>%
+  na.omit() %>% 
+  # Predicted J ranks
+  arrange(J_Predicted) %>%
+  mutate(Rank_J_predicted = seq_along(1:nrow(.))) %>%
+  # Observed J ranks
+  arrange(J_Observed) %>%
+  mutate(Rank_J_observed = seq_along(1:nrow(.))) %>%
+  # Predicted LR ranks
+  arrange(LR_Predicted) %>%
+  mutate(Rank_LR_predicted = seq_along(1:nrow(.))) %>%
+  # Observed LR ranks
+  arrange(LR_Observed) %>%
+  mutate(Rank_LR_observed = seq_along(1:nrow(.)))
+
+Czechia_df %>%
+  write.csv("../../Data/csv/B_06_Predictions_RankedList_CZ.csv")
+
+## New York State =========================================================== ##
+NewYork_df <- dat_cat_wide %>% 
+  filter(dataset == names_data[4]) %>%
+  ungroup() %>%
+  na.omit() %>% 
+  # Predicted J ranks
+  arrange(J_Predicted) %>%
+  mutate(Rank_J_predicted = seq_along(1:nrow(.))) %>%
+  # Observed J ranks
+  arrange(J_Observed) %>%
+  mutate(Rank_J_observed = seq_along(1:nrow(.))) %>%
+  # Predicted LR ranks
+  arrange(LR_Predicted) %>%
+  mutate(Rank_LR_predicted = seq_along(1:nrow(.))) %>%
+  # Observed LR ranks
+  arrange(LR_Observed) %>%
+  mutate(Rank_LR_observed = seq_along(1:nrow(.)))
+
+NewYork_df %>%
+  write.csv("../../Data/csv/B_06_Predictions_RankedList_NY.csv")
+
+## Europe =================================================================== ##
+Europe_df <- dat_cat_wide %>% 
+  filter(dataset == names_data[2]) %>%
+  ungroup() %>%
+  na.omit() %>% 
+  # Predicted J ranks
+  arrange(J_Predicted) %>%
+  mutate(Rank_J_predicted = seq_along(1:nrow(.))) %>%
+  # Observed J ranks
+  arrange(J_Observed) %>%
+  mutate(Rank_J_observed = seq_along(1:nrow(.))) %>%
+  # Predicted LR ranks
+  arrange(LR_Predicted) %>%
+  mutate(Rank_LR_predicted = seq_along(1:nrow(.))) %>%
+  # Observed LR ranks
+  arrange(LR_Observed) %>%
+  mutate(Rank_LR_observed = seq_along(1:nrow(.)))
+
+Europe_df %>%
+  write.csv("../../Data/csv/B_06_Predictions_RankedList_EU.csv")
+
+## Japan ==================================================================== ##
+Japan_df <- dat_cat_wide %>% 
+  filter(dataset == names_data[3]) %>%
+  ungroup() %>%
+  na.omit() %>% 
+  # Predicted J ranks
+  arrange(J_Predicted) %>%
+  mutate(Rank_J_predicted = seq_along(1:nrow(.))) %>%
+  # Observed J ranks
+  arrange(J_Observed) %>%
+  mutate(Rank_J_observed = seq_along(1:nrow(.))) %>%
+  # Predicted LR ranks
+  arrange(LR_Predicted) %>%
+  mutate(Rank_LR_predicted = seq_along(1:nrow(.))) %>%
+  # Observed LR ranks
+  arrange(LR_Observed) %>%
+  mutate(Rank_LR_observed = seq_along(1:nrow(.)))
+
+Japan_df %>%
+  write.csv("../../Data/csv/B_06_Predictions_RankedList_JP.csv")
+
+## All together ranked by J  ================================================ ##
+dfs_all <- rbind(Czechia_df, NewYork_df, Europe_df, Japan_df) %>% 
+  ungroup() %>%
+  na.omit() 
+
+dfs_all %>%
+  write.csv("../../Data/csv/B_06_Predictions_RankedList_ALL.csv")
+
+
+# Check most dynamic and most stable species ================================ ##
+risk_species <- head(dfs_all, 3) %>% pull(dataset, verbatim_name)
+stable_species <- tail(dfs_all, 3) %>% pull(dataset, verbatim_name)
+
+```
+
+# J Predicted vs. J Past plot
+
+```{r}
+
+library(egg)
+plot_df <- dfs_all %>% 
+  group_by(dataset, verbatim_name) %>% 
+  select(dataset, verbatim_name, J_Observed, J_Predicted) %>%
+  mutate(diff_J = J_Predicted- J_Observed) 
+
+JJ_plot <- ggplot(plot_df) +
+  aes(x = J_Predicted, y = J_Observed, colour = diff_J) +
+  geom_abline(slope = 1, intercept = 0, alpha = 0.5)+
+  geom_point(aes(size = abs(diff_J))) +
+  #geom_abline(slope = 1, intercept = 0, alpha = 0.5)+
+  scale_color_distiller(palette = "PuOr", direction = 1, limits = c(-0.9,0.9)) +
+  labs(
+    x = "J future",
+    y = "J past",
+    color = "Difference in J",
+    size = "Absolute difference in J"
+  ) +
+  xlim(0,1)+
+  ylim(0,1)+
+  common_theme +
+  theme(legend.position = "right")+
+  facet_wrap(vars(dataset))+
+  guides(color = guide_colorbar(), size = guide_legend())
+  
+JJ_plot2 <- tag_facet(JJ_plot, 
+            open = "")
+
+JJ_plot2
+graph2ppt(JJ_plot2, "../../Results/Figures/B2_Predictions/B_06_Jpast_Jfuture.ppt", width = 6, height = 6)
+
+```
+
+```{r}
+
+plots <- list(
+plot_df %>% group_by(dataset) %>% filter(dataset == names_data[1]) %>%
+    ggplot(aes(x = forcats::fct_reorder(.f = verbatim_name, .x =J_Predicted, .fun = max), 
+             y = J_Predicted, 
+             fill = diff_J, 
+             color = diff_J )) +
+  geom_col(position = "identity")+
+  scale_fill_distiller(palette = "PuOr", limits = c(-0.87,0.56))+
+  scale_color_distiller(palette = "PuOr", limits = c(-0.87,0.56))+
+  common_theme,
+
+plot_df %>% group_by(dataset) %>% filter(dataset == names_data[2]) %>%
+    ggplot(aes(x = forcats::fct_reorder(.f = verbatim_name, .x =J_Predicted, .fun = max), 
+             y = J_Predicted, 
+             fill = diff_J, 
+             color = diff_J )) +
+  geom_col(position = "identity")+
+  scale_fill_distiller(palette = "PuOr", limits = c(-0.87,0.56))+
+  scale_color_distiller(palette = "PuOr", limits = c(-0.87,0.56))+ common_theme,
+
+plot_df %>% group_by(dataset) %>% filter(dataset == names_data[3]) %>%
+    ggplot(aes(x = forcats::fct_reorder(.f = verbatim_name, .x =J_Predicted, .fun = max), 
+             y = J_Predicted, 
+             fill = diff_J, 
+             color = diff_J )) +
+  geom_col(position = "identity")+
+  scale_fill_distiller(palette = "PuOr", limits = c(-0.87,0.56))+
+  scale_color_distiller(palette = "PuOr", limits = c(-0.87,0.56))+ common_theme,
+
+plot_df %>% group_by(dataset) %>% filter(dataset == names_data[4]) %>%
+    ggplot(aes(x = forcats::fct_reorder(.f = verbatim_name, .x =J_Predicted, .fun = max), 
+             y = J_Predicted, 
+             fill = diff_J, 
+             color = diff_J )) +
+  geom_col(position = "identity")+
+  scale_fill_distiller(palette = "PuOr", limits = c(-0.87,0.56))+
+  scale_color_distiller(palette = "PuOr", limits = c(-0.87,0.56))+ common_theme
+)
+
+
+
+plots
+
+```
+
+
+# Jaccard \~ log ratio histogram
+
+```{r}
+
+
+J_LR_plot <- ggplot(dat_cat %>% filter(tp == 1), 
+                 aes(y = Jaccard, x = log_R2_1, fill = trend_LR)) +
+  ## Prepare background colors ============================================== ##
+  geom_hline(yintercept = 0.25, lwd = 0.2, col = "darkgrey") +
+  geom_hline(yintercept = 0.5, lwd = 0.1, col = "red") +
+  geom_hline(yintercept = 0.75, lwd = 0.2, col = "darkgrey") +
+  annotation_custom(grob = rectGrob(gp = gpar(fill = "#fdae61", col = "#fdae61", alpha = 0.3)), 
+                    xmin = log(0.5), xmax = log(0.9), ymin = 0, ymax = 0.9) +  # top-left
+  annotation_custom(grob = rectGrob(gp = gpar(fill = "#a6d96a", col = "#a6d96a", alpha = 0.3)), 
+                    xmin = log(1.1), xmax = log(2), ymin = 0, ymax = 0.9) +  # top-right
+  annotation_custom(grob = rectGrob(gp = gpar(fill = "#d7191c", col = "#d7191c", alpha = 0.3)), 
+                    xmin = -2, xmax = log(0.5), ymin = 0, ymax = 0.5) +  # middle-left
+  annotation_custom(grob = rectGrob(gp = gpar(fill = "#1a9641", col = "#1a9641", alpha = 0.3)), 
+                    xmin = log(2), xmax = 2, ymin = 0, ymax = 0.5)+   # bottom-right
+  annotation_custom(grob = rectGrob(gp = gpar(fill = "#d7191c", col = "#d7191c", alpha = 0.5)), 
+                    xmin = -Inf, xmax = -2, ymin = 0, ymax = 0.25) +  # bottom-left
+  annotation_custom(grob = rectGrob(gp = gpar(fill = "#1a9641", col = "#1a9641", alpha = 0.5)), 
+                    xmin = 2, xmax = Inf, ymin = 0, ymax = 0.25)+   # middle-right
+  annotation_custom(grob = rectGrob(gp = gpar(fill = "gray", col = "gray", alpha = 0.3)), 
+                    xmin = log(0.9), xmax = log(1.1), ymin = 0, ymax = 1)+   # bottom-right
+  
+  ## Add points ============================================================= ##
+  geom_jitter(shape = 21, col = "darkgrey") +
+  
+  ## Theme ================================================================== ##
+  theme_classic() +
+  
+
+  
+  ## Scales ================================================================= ##
+  scale_x_continuous(n.breaks = 9, limits = c(-4,4))+
+  scale_fill_manual(values = my_cols_LR)+
+  labs(y = "Jaccard (Observed)", x = "Log Ratio (Observed)", fill = "Direction")
+
+J_LR_plot2 <- ggExtra::ggMarginal(
+  p = J_LR_plot,
+  type = 'densigram',
+  margins = 'both',
+  size = 5,
+  colour = 'gray34',
+  fill = '#EBEBEBC5'
+)
+
+J_LR_plot2
+export::graph2ppt(J_LR_plot2, "../../Results/Figures/B2_Predictions/B_06_ScenariosMarginal.ppt")
+#ggsave("../../Results/Figures/3_Predictions/J_LR_plot.pdf", J_LR_plot2, width = 10, height = 10)
+#esquisse::ggplot_to_ppt("J_LR_plot2")
+
+
+```
+
+## allNumber of Species per Trend Histograms
+
+```{r}
+#| fig.width: 6
+#| fig.height: 4
+# Plot number of species per trend per dataset
+fig1_LR_past <- dat_cat %>% filter(tp == 1) %>%
+    group_by(dataset, trend_LR) %>% 
+    summarise(n_sp = n_distinct(verbatim_name)) %>% 
+ggplot(aes(y = n_sp, x = trend_LR, fill = trend_LR))+
+    geom_col(col = "lightgrey")+
+  ylim(0, 260)+
+    facet_grid(~dataset, labeller = as_labeller(atlas_label))+
+    theme_classic()+
+  scale_fill_manual(values = my_cols_LR) +
+    labs(title = "Log Ratio AOO ~ Nr of species") + 
+  common_theme_x_axis+
+  labs(x = "Occupancy trend (Log Ratio)", y = "Number of Species",
+    fill = NULL) 
+
+fig1_LR_past
+
+
+### 
+### 
+### 
+
+fig1_J_past <- dat_cat %>% 
+  filter(tp == 1) %>%
+    group_by(dataset, trend_J) %>% 
+    summarise(n_sp = n_distinct(verbatim_name)) %>% 
+ggplot(aes(y = n_sp, x = trend_J, fill = trend_J))+
+    geom_col(col = "lightgrey")+
+    facet_grid(~dataset, labeller = as_labeller(atlas_label))+
+    theme_classic()+
+    ylim(0, 260)+
+    scale_fill_manual(values = my_cols_J) +    
+    labs(title = "Jaccard ~ Nr of species") + 
+    common_theme_x_axis+ 
+    theme(axis.text.x = element_text(size = 8, vjust = 0))+
+    labs(x = "Occupancy trend (Jaccard)", y = "Number of Species",
+    fill = NULL) 
+
+fig1_J_past
+
+```
+
+```{r}
+ dat_cat %>% filter(trend == "increase") %>% group_by(dataset, tp) %>% 
+ ggplot(aes(y = log_R2_1, x = D_AOO_a))+
+ geom_point()+
+ geom_smooth()+
+ facet_wrap(~dataset)+
+ theme_classic()
+
+dat_cat %>% filter(trend == "decrease") %>% group_by(dataset, tp) %>% 
+ ggplot(aes(y = log_R2_1, x = D_AOO_a))+
+ geom_point()+
+ geom_smooth()+
+ facet_wrap(~dataset)+
+ theme_classic()
+
+dat_cat %>% filter(trend == "stable") %>% group_by(dataset, tp) %>% 
+ ggplot(aes(y = log_R2_1, x = D_AOO_a))+
+ geom_point()+
+ geom_smooth()+
+ facet_wrap(~dataset)+
+ theme_classic()
+
+#####
+
+ dat_cat %>% filter(trend == "increase") %>% group_by(dataset, tp) %>% 
+ ggplot(aes(y = log_R2_1, x = Mass))+
+ geom_point()+
+ geom_smooth()+
+ facet_wrap(~dataset,  scales = "free")+
+ theme_classic()
+
+dat_cat %>% filter(trend == "decrease") %>% group_by(dataset, tp) %>% 
+ ggplot(aes(y = log_R2_1, x = Mass))+
+ geom_point()+
+ geom_smooth()+
+ facet_wrap(~dataset, scales = "free")+
+ theme_classic()
+
+dat_cat %>% filter(trend == "stable") %>% group_by(dataset, tp) %>% 
+ ggplot(aes(y = log_R2_1, x = Mass))+
+ geom_point()+
+ geom_smooth()+
+ facet_wrap(~dataset, scales = "free")+
+ theme_classic()
+
+#####
+```
+
+## Predicted vs. observed plots
+
+```{r}
+pred_observed = seeds_predictions_list[[1]] %>% 
+ggplot(aes(x = Observed, y = Predicted, colour = data)) +
+  geom_point(shape = "circle", size = 1.5) +
+  geom_smooth(method = "loess")+
+  scale_color_manual(
+    values = c(log_R_future = "#C95E14",
+    log_R_past = "#560180")
+  ) +
+  theme_classic() +
+  theme(legend.position = "none")+
+  geom_hline(yintercept = 0)+
+  geom_vline(xintercept = 0)+
+  ylim(-2,2) #+ theme(legend.position = "right")
+
+```

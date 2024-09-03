@@ -1,0 +1,564 @@
+---
+title: "Script 5 - Variation Partitioning"
+date: "2024-07-29"
+
+format:
+  html:
+    theme: united
+    toc: true
+    code-overflow: wrap
+    self-contained: true
+    embed-resources: true
+---
+
+::: panel-tabset
+## Source: Custom Functions
+
+```{r}
+#| label: load-packages
+#| message: false
+#| warning: false
+#| error: false
+
+rm(list = ls())
+source("../../Code/src/B_config.R")
+source("../../Code/src/functions.R")
+
+install_and_load <- function (package_list) 
+{
+    for (pkg in package_list) {
+        if (!require(pkg, character.only = TRUE)) {
+            if (!is.element(pkg, installed.packages()[, "Package"])) {
+                install.packages(pkg, dependencies = TRUE)
+            }
+            suppressPackageStartupMessages(library(pkg, character.only = TRUE))
+        }
+    }
+}
+
+
+```
+
+## Machine Learning Packages
+
+```{r}
+#| label: load-ML-packages
+#| message: false
+#| warning: false
+#| error: false
+
+
+pckgs <- c("dplyr", "ggplot2", "reshape2", 
+           "caret", "ranger", "gbm", "xgboost", 
+           "gridExtra", "kableExtra")
+
+install_and_load(pckgs)
+```
+
+## Load RData to reduce computing time
+
+```{r}
+#| label: load-reduced-RData
+#| message: false
+#| warning: false
+#| error: false
+
+#load("Results/RData/B_02_rfe.RData")
+load("../../Results/RData/B_05_VariationPartitioning.RData")
+
+dat_test_list <- list(dat_test_J, dat_test_LR)
+
+```
+:::
+
+### Variation Partitioning between Hypotheses
+
+Now we will look which of the four hypotheses explains most variation in the response.
+
+::: panel-tabset
+## Variation Partitioning - ranger loops (Jaccard & log Ratio)
+
+```{r}
+#| label: var-part-rf-all
+#| code-fold: true
+#| eval: false
+
+index_list <- indices10
+dat_train_list <- list(dat_train_J, dat_train_LR)
+response_list <- c("Jaccard", "log_R2_1")
+
+varPart_list <- replicate(2, list())
+
+for(i in seq_along(response_list)){
+  
+  dat_train <- dat_train_list[[i]]
+  index <- index_list[[i]]
+  response <- response_list[[i]]
+
+  trainControl <- trainControl(
+    method = "repeatedcv",
+    number = 10,
+    repeats = 3,
+    savePredictions = "final",
+    returnResamp = "final",
+    verboseIter = FALSE,
+    index = index)
+
+  tictoc::tic("ranger full model")
+  set.seed(42)
+  full_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train,
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+tictoc::toc()
+
+
+# Train ranger model
+tictoc::tic("ranger H1")
+set.seed(42)
+H1_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(H1_vars)),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+tictoc::toc()
+
+
+tictoc::tic("ranger H2")
+set.seed(42)
+H2_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(H2_vars)),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+tictoc::toc()
+
+
+tictoc::tic("ranger H3")
+set.seed(42)
+H3_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(H3_vars)),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+tictoc::toc()
+
+tictoc::tic("ranger H4")
+set.seed(42)
+H4_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(H4_vars)),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+tictoc::toc()
+
+
+### combinations of 2 hypotheses:
+
+set.seed(42)
+H1H2_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H1_vars, H2_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+set.seed(42)
+H1H3_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H1_vars, H3_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+set.seed(42)
+H1H4_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H1_vars, H4_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+
+set.seed(42)
+H2H3_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H2_vars, H3_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+
+set.seed(42)
+H2H4_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H2_vars, H4_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+set.seed(42)
+H3H4_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H3_vars, H4_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+
+### combinations of 3 hypotheses together =====
+
+set.seed(42)
+H1H2H3_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H1_vars, H2_vars, H3_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+set.seed(42)
+H1H2H4_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H1_vars, H2_vars, H4_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+set.seed(42)
+H1H3H4_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H1_vars, H3_vars, H4_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+set.seed(42)
+H2H3H4_model <- train(
+    as.formula(paste0(response, "~ .")),
+    data = dat_train %>% select(response, any_of(c(H1_vars, H2_vars, H3_vars))),
+    method = "ranger",
+    trControl = trainControl,
+    importance = "permutation",
+    scale.permutation.importance = TRUE,
+    num.trees = 1000,
+    respect.unordered.factors = TRUE,
+    oob.error = TRUE,
+    tuneLength = 5)
+
+varPart_list[[i]] <- list(
+    full_model, H1_model, H2_model, H3_model, H4_model, 
+    H1H2_model, H1H3_model, H1H4_model, 
+    H2H3_model, H2H4_model, 
+    H3H4_model, 
+    H1H2H3_model, H1H2H4_model, H1H3H4_model, 
+    H2H3H4_model)
+}
+
+saveRDS(varPart_list, "Results/RData/B_05_VariationPartitioning.RData")
+
+```
+
+## Functions to perform variation partitioning 
+The function was adapted from the vegan::varpart4() function
+```{r}
+
+RF_varPart4 <- function (model_list) {
+    
+  # H1
+    dummy <- model_list[[2]]
+    aeghklno.ua <- dummy$finalModel$r.squared
+    
+  # H2
+    dummy <- model_list[[3]]
+    befiklmo.ua <- dummy$finalModel$r.squared
+
+  # H3
+    dummy <- model_list[[4]]
+    cfgjlmno.ua <- dummy$finalModel$r.squared
+  
+  # H4
+    dummy <- model_list[[5]]
+    dhijkmno.ua <- dummy$finalModel$r.squared
+
+  # H1H2
+    dummy <- model_list[[6]]
+    abefghiklmno.ua <- dummy$finalModel$r.squared
+
+  # H1H3
+    dummy <- model_list[[7]]
+    acefghjklmno.ua <- dummy$finalModel$r.squared
+
+  # H1H4    
+    dummy <- model_list[[8]]
+    adeghijklmno.ua <- dummy$finalModel$r.squared
+
+  # H2H3  
+    dummy <- model_list[[9]]
+    bcefgijklmno.ua <- dummy$finalModel$r.squared
+
+  # H2H4
+    dummy <- model_list[[10]]
+    bdefhijklmno.ua <- dummy$finalModel$r.squared
+
+  # H3H4
+    dummy <- model_list[[11]]
+    cdfghijklmno.ua <- dummy$finalModel$r.squared
+
+  # H1H2H3
+    dummy <- model_list[[12]]
+    abcefghijklmno.ua <- dummy$finalModel$r.squared
+
+  # H1H2H4
+    dummy <- model_list[[13]]
+    abdefghijklmno.ua <- dummy$finalModel$r.squared
+
+  # H1H3H4
+    dummy <- model_list[[14]]
+    acdefghijklmno.ua <- dummy$finalModel$r.squared
+
+  # H2H3H4
+    dummy <- model_list[[15]]
+    bcdefghijklmno.ua <- dummy$finalModel$r.squared
+
+  # H1H2H3H4
+    dummy <- model_list[[1]]
+    abcdefghijklmno.ua <- dummy$finalModel$r.squared
+
+    
+    
+    fract <- data.frame(R.square = c(aeghklno.ua, befiklmo.ua, cfgjlmno.ua,
+                                     dhijkmno.ua, abefghiklmno.ua, acefghjklmno.ua,
+                                     adeghijklmno.ua, bcefgijklmno.ua, bdefhijklmno.ua,
+                                     cdfghijklmno.ua, abcefghijklmno.ua, abdefghijklmno.ua,
+                                     acdefghijklmno.ua, bcdefghijklmno.ua, abcdefghijklmno.ua))
+    
+    rownames(fract) <- c("[aeghklno.ua] = X1", "[befiklmo.ua] = X2",
+                         "[cfgjlmno.ua] = X3", "[dhijkmno.ua] = X4", "[abefghiklmno.ua] = X1+X2",
+                         "[acefghjklmno.ua] = X1+X3", "[adeghijklmno.ua] = X1+X4", "[bcefgijklmno.ua] = X2+X3",
+                         "[bdefhijklmno.ua] = X2+X4", "[cdfghijklmno.ua] = X3+X4", "[abcefghijklmno.ua] = X1+X2+X3",
+                         "[abdefghijklmno.ua] = X1+X2+X4", "[acdefghijklmno.ua] = X1+X3+X4",
+                         "[bcdefghijklmno.ua] = X2+X3+X4", "[abcdefghijklmno.ua] = All")
+    
+    ## Triplets
+    ae = acdefghijklmno.ua - cdfghijklmno.ua
+    ag = abdefghijklmno.ua - bdefhijklmno.ua
+    ah = abcefghijklmno.ua - bcefgijklmno.ua
+    be = bcdefghijklmno.ua - cdfghijklmno.ua
+    bf = abdefghijklmno.ua - adeghijklmno.ua
+    bi = abcefghijklmno.ua - acefghjklmno.ua
+    cf = acdefghijklmno.ua - adeghijklmno.ua
+    cg = bcdefghijklmno.ua - bdefhijklmno.ua
+    cj = abcefghijklmno.ua - abefghiklmno.ua
+    dh = bcdefghijklmno.ua - bcefgijklmno.ua
+    di = acdefghijklmno.ua - acefghjklmno.ua
+    dj = abdefghijklmno.ua - abefghiklmno.ua
+    contr2 <- data.frame(R.square = c(ae, ag, ah, be, bf, bi, cf, cg, cj, dh, di, dj))
+    
+    rownames(contr2) <- c("[ae] = X1 | X3+X4", "[ag] = X1 | X2+X4",
+                          "[ah] = X1 | X2+X3", "[be] = X2 | X3+X4", "[bf] = X2 | X1+X4",
+                          "[bi] = X2 | X1+X3", "[cf] = X3 | X1+X4", "[cg] = X3 | X2+X4",
+                          "[cj] = X3 | X1+X2", "[dh] = X4 | X2+X3", "[di] = X4 | X1+X3",
+                          "[dj] = X4 | X1+X2")
+    
+    ## Pairs
+    aghn = abefghiklmno.ua - befiklmo.ua
+    aehk = acefghjklmno.ua - cfgjlmno.ua
+    aegl = adeghijklmno.ua - dhijkmno.ua
+    bfim = abefghiklmno.ua - aeghklno.ua
+    beik = bcefgijklmno.ua - cfgjlmno.ua
+    befl = bdefhijklmno.ua - dhijkmno.ua
+    cfjm = acefghjklmno.ua - aeghklno.ua
+    cgjn = bcefgijklmno.ua - befiklmo.ua
+    cfgl = cdfghijklmno.ua - dhijkmno.ua
+    dijm = adeghijklmno.ua - aeghklno.ua
+    dhjn = bdefhijklmno.ua - befiklmo.ua
+    dhik = cdfghijklmno.ua - cfgjlmno.ua
+
+    contr1 <- data.frame(R.square = c(aghn, aehk, aegl, bfim, beik, befl, cfjm, cgjn, cfgl, dijm, dhjn, dhik))
+    rownames(contr1) <- c("[aghn] = X1 | X2", "[aehk] = X1 | X3",
+                          "[aegl] = X1 | X4", "[bfim] = X2 | X1", "[beik] = X2 | X3",
+                          "[befl] = X2 | X4", "[cfjm] = X3 | X1", "[cgjn] = X3 | X2",
+                          "[cfgl] = X3 | X4", "[dijm] = X4 | X1 ", "[dhjn] = X4 | X2",
+                          "[dhik] = X4 | X3")
+    a <- abcdefghijklmno.ua - bcdefghijklmno.ua # full minus triplet
+    b <- abcdefghijklmno.ua - acdefghijklmno.ua
+    c <- abcdefghijklmno.ua - abdefghijklmno.ua
+    d <- abcdefghijklmno.ua - abcefghijklmno.ua
+    e <- ae - a # Unique from triplet minus unique from pair
+    f <- bf - b
+    g <- ag - a
+    h <- ah - a
+    i <- bi - b
+    j <- cj - c
+    k <- aehk - ae - h
+    l <- aegl - ae - g
+    m <- bfim - bf - i
+    n <- aghn - ag - h
+    o <- aeghklno.ua - aehk - g - l - n
+    indfract <- data.frame(R.square = c(a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, 1 - abcdefghijklmno.ua))
+    rownames(indfract) <- c("[a] = X1 | X2+X3+X4", "[b] = X2 | X1+X3+X4",
+                            "[c] = X3 | X1+X2+X4", "[d] = X4 | X1+X2+X3", "[e]",
+                            "[f]", "[g]", "[h]", "[i]", "[j]", "[k]", "[l]", "[m]",
+                            "[n]", "[o]", "[p] = Residuals")
+    
+    
+    out <- list(fract = fract, indfract = indfract, contr1 = contr1, contr2 = contr2, nsets = 4)
+
+}
+
+
+
+## Function to plot results:
+library(vegan)
+plot_rfVarPart <- function(x, cutoff = -1 , digits = 2,  ...)
+  {
+    vals <- x$indfract[, 1]
+    is.na(vals) <- vals < cutoff
+    #if (cutoff >= 0)
+      vals <- round(vals, digits+1)
+    labs <-  format(vals, digits=digits, nsmall=digits+1)
+    labs <- gsub("NA", "", labs)
+    showvarparts(x$nsets, labs, ...)
+    if (any(is.na(vals)))
+      mtext(paste("Values <", cutoff," not shown", sep=""), 1)
+    invisible()
+}
+
+```
+
+
+
+## Extract R2 from models
+
+```{r}
+# Apply function to model list
+## Jaccard
+model_list_J <- varPart_list[[1]] # Jaccard
+out_J <- RF_varPart4(model_list_J)
+
+out_J_df <- do.call(rbind, out_J)
+out_J_df$set <- rownames(out_J_df)
+rownames(out_J_df) <- NULL
+out_J_df <- out_J_df[c("set", "R.square")]
+
+# Make plot:
+out_J_df %>% mutate_if(is.numeric, round, 3) %>% kableExtra::kable()
+# out_J_df %>% mutate_if(is.numeric, round, 3) %>% write.csv2("../../Data/csv/05_varExplained_Jaccard.csv")
+
+
+## LogRatio
+model_list_LR <- varPart_list[[2]] # LR
+out_LR <- RF_varPart4(model_list_LR)
+
+out_LR_df <- do.call(rbind, out_LR)
+out_LR_df$set <- rownames(out_LR_df)
+rownames(out_LR_df) <- NULL
+out_LR_df <- out_LR_df[c("set", "R.square")]
+
+# Make plot:
+out_LR_df %>% mutate_if(is.numeric, round, 3) %>% kableExtra::kable()
+# out_LR_df %>% mutate_if(is.numeric, round, 3) %>% write.csv2("../../Data/csv/05_varExplained_LogRatio.csv")
+
+```
+## Venn Diagrams
+```{r}
+#| fig.width: 10
+#| fig.height: 10
+
+# pdf("../../Results/Figures/05_VennDiagrams.pdf", width = 10, height = 10, onefile = TRUE )
+# Jaccard
+Venn_J <- plot_rfVarPart(out_J, bg = c("red",  "green","blue", "yellow"), alpha = 90, id.size = 0.9, Xnames = c("H1 - Species Traits", "H2 - Range Geometry", "H3 - Species Diversity", "H4 - Atlas characteristics"))
+
+# Log Ratio
+Venn_LR <- plot_rfVarPart(out_LR, bg = c("red",  "green","blue", "yellow"),  alpha = 90, id.size = 0.9, Xnames = c("H1 - Species Traits", "H2 - Range Geometry", "H3 - Species Diversity", "H4 - Atlas characteristics"))
+
+export::graph2ppt(Venn_J, "../../Results/Figures/B2_MachineLearning/B_05_Venn_J.ppt", height = 10, width = 10)
+export::graph2ppt(Venn_LR, "../../Results/Figures/B2_MachineLearning/B_05_Venn_LR.ppt", height = 10, width = 10)
+
+
+
+
+```
+
+:::
+
+```{r}
+gc()
+save.image("../../Data/RData/B_05_VariationPartitioning.RData")
+```

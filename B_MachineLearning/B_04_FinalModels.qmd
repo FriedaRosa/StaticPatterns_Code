@@ -1,0 +1,151 @@
+---
+title: "Script 4 - FinalModels"
+date: "2023-05-29"
+---
+
+::: panel-tabset
+## Source custom functions
+
+```{r}
+#| label: load-functions
+#| message: FALSE
+#| warning: FALSE
+rm(list = ls())
+source("../src/B_config.R")
+source("../src/functions.R")
+
+
+```
+
+## Load RData to reduce computing time
+
+```{r}
+#| label: load-RData
+#| message: FALSE
+#| error: FALSE
+
+# Load final workspace to save computing time:
+load("../../Data/RData/B_03_reduced_hyper_para_tuning_all_models.RData")
+load("../../Data/RData/B_02_rfe_full_vs_reduced.RData")
+ load("../../Data/RData/B_04_FinalModels.RData")
+
+rm(pckgs, resamps, summary_resamps, dotplot_resamps)
+```
+:::
+
+## Predictive performances
+
+```{r}
+#| fig.width: 4
+#| fig.height: 4
+
+library(egg)
+
+pred_dat <- data.frame(Predicted = predict(saved_models[[1]], newdata = dat_test_J), 
+                       Observed = dat_test_J$Jaccard,
+                       dataset = dat_test_J$dataset) 
+
+
+pred_obs <- ggplot(pred_dat, aes(x = Predicted, y = Observed)) +
+  geom_point(shape = "circle", size = 1.5, alpha = 0.6) +
+  facet_wrap(~dataset)+
+  geom_smooth(method="lm")+
+  common_theme +
+  theme(axis.text = element_text(size = 8))+
+  ylim(0,1)+
+  xlim(0,1)+
+  geom_abline(slope = 1)+
+  theme(legend.position = "none")+
+  theme(legend.position = "right")+
+  labs(y = "J (Observed)", x = "J (Predicted)")
+
+pred_obs_tag <- tag_facet(pred_obs)
+pred_obs_tag
+
+export::graph2ppt(pred_obs_tag, "../../Results/Figures/3_Predictions/B_04_PredObsJ_tagged.ppt", width = 5, height=4)
+
+## Log ratio ====
+pred_dat2 <- data.frame(Predicted = predict(saved_models[[2]], newdata = dat_test_LR), 
+                       Observed = dat_test_LR$log_R2_1,
+                       dataset = dat_test_LR$dataset) 
+
+
+pred_obs2 <- ggplot(pred_dat2, aes(x = Predicted, y = Observed)) +
+  geom_point(shape = "circle", size = 1.5, alpha = 0.6) +
+  facet_wrap(~dataset)+
+  geom_smooth(method="lm")+
+  common_theme +
+  ylim(0,1)+
+  xlim(0,1)+
+  geom_abline(slope = 1)+
+  theme(axis.text = element_text(size = 8))+
+  labs(y = "Log Ratio (Observed)", x = "Log Ratio (Predicted)")
+
+pred_obs_tag2 <- tag_facet(pred_obs2)
+pred_obs_tag2
+export::graph2ppt(pred_obs_tag2, "../../Results/Figures/3_Predictions/B_04_PredObsLR_tagged.ppt", width = 5, height=4)
+
+
+```
+
+```{r}
+# J
+
+dd_test <- dat_test_J
+## Predictive Performance analysis ================================================
+p_J <- as.data.frame(
+  predict(saved_models[[1]], newdata = dd_test)) %>% 
+  cbind(dd_test$Jaccard) %>%
+  mutate(
+    error_ranger = dd_test$Jaccard-predict(saved_models[[1]], newdata = dd_test))
+
+p_J %>%
+  summarise(mean_ranger = mean(error_ranger)) %>% 
+  kableExtra::kable() # ranger performs best
+
+
+# -------------------------------------------------------------- #
+
+# LR
+
+dd_test <- dat_test_LR
+## Predictive Performance analysis ================================================
+p_LR <- as.data.frame(
+  predict(saved_models[[2]], newdata = dd_test)) %>% 
+  cbind(dd_test$log_R2_1) %>%
+  mutate(
+    error_ranger = dd_test$log_R2_1-predict(saved_models[[2]], newdata = dd_test))
+
+p_LR %>%
+  summarise(mean_ranger = mean(error_ranger)) %>% 
+  kableExtra::kable() # ranger performs best
+```
+
+## Summarize predictor importance
+
+```{r}
+# Summarize predictor importances ============================================
+
+
+# J
+imp_J <- varImp(saved_models[[1]])$importance %>% 
+  as.data.frame() %>%
+  dplyr::rename("imp_J" = "Overall")
+imp_J$var <- row.names(imp_J)
+
+# LR
+imp_LR <- varImp(saved_models[[2]])$importance %>% 
+  as.data.frame() %>%
+    dplyr::rename("imp_LR" = "Overall")
+imp_LR$var <- row.names(imp_LR)
+
+imp_all <- full_join(imp_J, imp_LR)
+
+
+
+```
+
+```{r}
+rm(response, predictors, index, dd, dd_test, trained_control)
+save.image("../../Data/RData/B_04_FinalModels.RData")
+```

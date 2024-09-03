@@ -1,0 +1,171 @@
+---
+title: "Predictor Variables Calculations 1"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+
+# Setting up environment
+```{r}
+
+source("../src/A_config.R")
+source("../src/functions.R")
+
+# Additional libraries:
+
+suppressPackageStartupMessages(library(fossil)) # Co occurrence matrix
+suppressPackageStartupMessages(library(cooccur)) # Co occurrence probability
+
+
+# Load environment from A1 & A2
+load(paste0(out_path, "RData/A_02_Atlas_Var_Calc.RData"))
+ls()
+```
+
+
+# Diversity Metrics
+
+```{r}
+ sp_cell_dat <- occ_data_final
+# sp_cell_dat <- readRDS(paste0(out_path, "rds/A_02_SpeciesDatPerCell.rds"))
+
+## Calculate Diversity Measures ======================
+ GammaAlphaBeta_Species <- sp_cell_dat %>% 
+    ungroup() %>%
+    filter(cell_grouping == 1) %>%
+    dplyr::select(dataset, tp, cell_label, verbatim_name) %>%
+    distinct() %>%
+  
+    group_by(dataset, tp) %>%
+    dplyr::mutate(GammaSR = sum(n_distinct(verbatim_name))) %>%
+    ungroup() %>%
+  
+    group_by(dataset, tp, cell_label) %>%
+    dplyr::mutate(AlphaSR = sum(n_distinct(verbatim_name))) %>%
+    dplyr::mutate(BetaSR = GammaSR / AlphaSR) %>%
+    ungroup() %>%
+  
+    group_by(dataset, tp, verbatim_name) %>%
+    dplyr::mutate(AlphaSR_sp = mean(AlphaSR)) %>%
+    dplyr::mutate(BetaSR_sp = GammaSR / AlphaSR_sp) %>%
+    dplyr::select(dataset, tp, verbatim_name, AlphaSR_sp, BetaSR_sp, GammaSR) %>%
+    distinct()
+
+```
+
+# Co-occurrence probabilities
+Creation of the community matrices takes a while.
+
+```{r}
+#| eval: false
+tictoc::tic()
+
+# filter highest resolution
+species_data <- sp_cell_dat %>% 
+  filter(cell_grouping == 1) %>% 
+  distinct(dataset, tp, verbatim_name, cell_label) 
+colSums(is.na(species_data))
+
+
+# ----------------------------------------------------------- #
+
+co_occ_list1 <- list()
+
+for (a in seq_along(atlas_names)){
+  
+  # create community dataframe
+  comm_dat <- species_data %>% 
+    filter(dataset == atlas_names[a]) %>%
+    ungroup() %>%
+    dplyr::select(tp, verbatim_name, cell_label) %>%    
+    group_by(tp) %>% 
+    ungroup() %>% 
+    distinct()
+  
+  comm_dat <- as.data.frame(comm_dat)
+  
+  # Convert data frame to Species X sites matrix
+  comm_matrix_tp1 <- fossil::create.matrix(comm_dat, 
+                                           tax.name = "verbatim_name", 
+                                           locality = "cell_label", 
+                                           time.col = "tp", 
+                                           time = "1", 
+                                           abund = F)
+  
+  comm_matrix_tp2 <- fossil::create.matrix(comm_dat, 
+                                           tax.name = "verbatim_name", 
+                                           locality = "cell_label", 
+                                           time.col = "tp", 
+                                           time = "2", 
+                                           abund = F)
+  
+  # Calculate probability of pairwise co-occurrence of species: ----------- #
+  co_occurrence_tp1 <- cooccur::cooccur(comm_matrix_tp1, spp_names = T)
+
+  co_occurrence_tp2 <- cooccur::cooccur(comm_matrix_tp2, spp_names = T)
+
+  co_occ_list1[[a]] <- list(co_occurrence_tp1, co_occurrence_tp2)
+}
+
+saveRDS(co_occ_list1, paste0(out_path, "rds/A_3a_co_occ_lists.rds"))
+tictoc::toc()
+```
+
+
+```{r}
+co_occ_list1 <- readRDS(paste0(out_path, "rds/A_3a_co_occ_lists.rds"))
+plot(co_occ_list1[[1]][[1]])
+summary(co_occ_list1[[1]][[1]])
+```
+
+```{r}
+
+co_occ_list2 <-list()
+for (a in seq_along(atlas_names)){
+  
+  species_data_a <- species_data %>% 
+    filter(dataset == atlas_names[a])
+  species_data_a1 <- species_data_a %>% 
+    select(-cell_label) %>% 
+    distinct()
+
+  res1 <- data.frame(co_occ_list1[[a]][[1]]$results) 
+  res1 <- res1 %>% 
+    group_by(sp1_name) %>%
+    mutate(mean_prob_cooccur = mean(prob_cooccur), tp = "1") %>% 
+    dplyr::select(sp1_name, mean_prob_cooccur, tp) %>% 
+    distinct()
+
+  res2 <- data.frame(co_occ_list1[[a]][[2]]$results) 
+  res2 <- res2 %>% 
+    group_by(sp1_name) %>%
+    mutate(mean_prob_cooccur = mean(prob_cooccur), tp = "2") %>% 
+    dplyr::select(sp1_name, mean_prob_cooccur, tp) %>% 
+    distinct()
+  
+  results <- full_join(res1,res2)
+  species_data_a1_2 <- merge(species_data_a1, results, by.x=c("verbatim_name", "tp"), by.y = c("sp1_name", "tp"), all = T)
+  co_occ_list2[[a]] <- species_data_a1_2
+  
+
+  }
+ 
+Co_Occ_df_final <- plyr::rbind.fill(co_occ_list2)
+
+# rm(co_occ_list2, comm_dat, comm_matrix_tp1, comm_matrix_tp2, species_data, species_data_a, species_data_a1, species_data_a1_2, a, co_occ_list1, co_occurrence_tp1, co_occurrence_tp2)
+
+```
+
+
+```{r, eval = F}
+saveRDS(Co_Occ_df_final, paste0(out_path, "Predictors/A_3a_Co_Occ_df_final.rds"))
+saveRDS(GammaAlphaBeta_Species, paste0(out_path, "Predictors/A_3a_GammaAlphaBeta_Species.rds"))
+
+save.image(paste0(out_path, "RData/A_3a_Predictors.RData"))
+```

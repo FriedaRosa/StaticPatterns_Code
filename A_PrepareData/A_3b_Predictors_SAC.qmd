@@ -1,0 +1,169 @@
+---
+title: "Predictor Variables Calculations 2"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+
+# Spatial Autocorrelation
+
+## Clean environment
+```{r}
+rm(list=ls())
+gc()
+```
+
+## Libraries
+
+```{r}
+pacman::p_load("ncf", "dplyr", "rstatix", "sf")
+sf_use_s2(FALSE)
+```
+
+
+## Data
+```{r}
+time_periods <- c(1,2)
+atlas_names <- c("Birds_Atlas_Czechia", 
+                 "Birds_Atlas_New_York",
+                 "Birds_atlas_Japan", 
+                 "Birds_atlas_EBBA")
+
+out_path <- "../../Results/"
+df <- readRDS(paste0(out_path, "rds/A_01_Presence_data_filtered.rds"))
+
+unique(df[[1]]$num_periods_cells) # reduced data
+
+```
+
+## Spatial Autocorrelation
+
+```{r, eval = F}
+tictoc::tic()
+# Species 
+morans_list <- list()
+data_list <- list()
+# Years
+morans_list2 <- list()
+data_list2 <- list()
+# Atlases
+morans_list3 <- list()
+data_list3 <- list()
+
+# Loop:
+for (a in seq_along(atlas_names)){
+    
+    dd <- df[[a]] %>%
+        ungroup() %>%
+        filter(cell_grouping == 1) %>%
+        select(
+            dataset, tp, verbatim_name, 
+            area, cell_lat, cell_long, cell_label) %>%
+        distinct(dataset, tp, verbatim_name, cell_label, .keep_all = T) 
+
+    for (y in seq_along(time_periods)){
+
+        dd_y <- dd %>% filter(tp == time_periods[y]) 
+        sp_list <- unique(dd_y$verbatim_name)
+
+        for (s in seq_along(sp_list)){
+            # Print progress 
+            print(paste(
+                "atlas =", unique(dd_y$dataset), 
+                "tp =", unique(dd_y$tp), 
+                "N = ", s, "/", length(sp_list), 
+                "sp = ", sp_list[s]))
+
+            # Obtain a df for each species that indicates the presence (1) or absence (0) of the species
+            ## Credits: XXX (anonymized) wrote the following code chunk to obtain presence-absence df for each species:
+            data_species <- dd_y %>% 
+                distinct(verbatim_name, cell_label, cell_lat, cell_long) %>% 
+                ungroup() %>% unique() %>%
+                mutate(
+                    verbatim_name = ifelse(verbatim_name != sp_list[s], NA, verbatim_name)) %>%
+                group_by(across(-verbatim_name)) %>%
+                slice(which.max(!is.na(verbatim_name))) %>% 
+                distinct(verbatim_name, cell_label, .keep_all=T) %>%
+                mutate(
+                    presence = ifelse(!is.na(verbatim_name), 1, 0)) %>% 
+                ungroup()
+
+            data_reduced <- dd_y %>% 
+                filter(verbatim_name == sp_list[s]) %>% 
+                select(verbatim_name, dataset, tp, area) %>% 
+                distinct() %>% 
+                mutate(mean_area = mean(area),
+                    mean_cell_length = sqrt(mean_area)) %>% 
+                mutate(
+                    increment2 = mean_cell_length * 1.75) %>% 
+                ungroup() %>% 
+                distinct(verbatim_name, .keep_all = T)
+      
+            data_species$increment <- data_reduced$increment2
+
+            tryCatch({
+                print("Attempting to calculate Moran's I")
+                morans_cor <- correlog(x = data_species$cell_long, 
+                         y = data_species$cell_lat, 
+                         z = data_species$presence, 
+                         latlon = TRUE, 
+                         increment = unique(data_species$increment), 
+                         resamp = 0)
+  
+                data_reduced$moran <- morans_cor$correlation[1]
+                data_reduced$x_intercept <- morans_cor$x.intercept
+  
+                print("Moran's I calculated successfully")
+                }, 
+                error = function(e) {
+                    print("Error occurred while calculating Moran's I")
+                    print(paste("Error message:", e))
+                    morans_cor <- NA
+                    data_reduced$moran <- NA
+                    data_reduced$x_intercept <- NA
+            })
+            data_list[[s]] <- data_reduced
+            morans_list[[s]] <- morans_cor 
+
+
+        } # species loop closing
+        morans_list2[[y]] <- morans_list
+        data_df <- plyr::rbind.fill(data_list)
+        data_list2[[y]] <- data_df
+
+
+    } # year loop closing
+    morans_list3[[a]] <- morans_list2
+    data_df2 <- plyr::rbind.fill(data_list2)
+    data_list3[[a]] <- data_df2
+
+
+} # atlas loop closing
+
+data_df_all <- plyr::rbind.fill(data_list3) 
+ 
+# Data Checks:
+colSums(is.na(data_df_all))
+ls()
+rm(a, y, s, sp_list, data_species, data_reduced, dd_y, dd, morans_cor )
+# Save Output:
+saveRDS(morans_list3, paste0(out_path, "rds/A_3b_SAC_Morans_List.rds"))
+saveRDS(data_df_all, paste0(out_path, "Predictors/A_3b_SAC_Data_Df.rds")
+
+save.image(paste0(out_path, "RData/A_3b_SAC.RData")
+
+
+
+data_df_all %>% group_by(dataset, tp) %>% rstatix::get_summary_stats(c(moran,x_intercept), type = "robust")
+data_df_all %>% distinct(verbatim_name) %>% nrow()
+tictoc::toc()
+
+
+plot(data_df_all$moran, data_df_all$x_intercept)
+```

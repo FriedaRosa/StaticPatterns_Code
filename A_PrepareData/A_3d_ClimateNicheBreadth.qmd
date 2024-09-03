@@ -1,0 +1,573 @@
+---
+title: "Predictor Variables Calculations 4"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+
+# Clean environment
+
+```{r}
+source("../src/A_config.R")  # configurations / data paths / variables / plotting settings / libraries
+source("../src/functions.R") # processing functions
+```
+
+
+# Libraries
+
+```{r}
+
+pkg <- c("terra", "ggplot2", "ggfortify")
+install_and_load(pkg)
+
+
+library("rasterSp")
+library("climateNiche")
+
+```
+
+
+
+```{r}
+#| label: get-dependencies-rasterSp-climateNiche
+#| eval: false
+
+
+# Install remotes if not previously installed
+if(!"remotes" %in% installed.packages()[,"Package"]) install.packages("remotes")
+
+# Install rasterSp from Github if not previously installed
+if(!"rasterSp" %in% installed.packages()[,"Package"]) remotes::install_github("RS-eco/rasterSp", build_vignettes = T)
+
+#Automatically install required packages, which are not yet installed
+packages <- c("rgbif", "sp", "raster", "dplyr", "sf", "ggplot2", "rebird", "remotes", "outliers")
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages); rm(new.packages)
+
+# Load packages
+l <- sapply(packages, require, character.only = TRUE, quietly=TRUE); rm(packages, l)
+
+
+# Instal missing packages from GitHub
+packages_github <- c("rasterSp", "climateNiche", "ggmap2", "rISIMIP")
+new.packages <- packages_github[!(packages_github %in% installed.packages()[,"Package"])]
+if(length(new.packages)) remotes::install_github(paste0("RS-eco/", new.packages), build_vignettes=T)
+rm(new.packages)
+
+# Load additional packages
+l <- sapply(packages_github, require, character.only = TRUE, quietly=TRUE); rm(packages_github, l)
+```
+
+
+# Data
+
+```{r}
+# additional path variables for global climate and range data
+
+source_predictors <- paste0(home_path, "Dokumenty/PhD_Projects/StaticPredictors/Data/")
+CHELSA_path <- paste0(source_predictors, "Chelsa_Bio_PET/")
+
+
+# List all the .tif files in the directory
+tif_files <- list.files(path=CHELSA_path, pattern = ".tif$")
+
+# The input file geodatabase from BirdLife International 2018
+fgdb <-paste0(home_path, "Datasets/Raw/Distributions/Birds_of_the_world/BOTW.gdb")
+
+```
+
+## Species Names
+
+```{r}
+# Taxonomic data from BirdLife international
+Tax <- st_read(fgdb, layer = "Taxonomic_checklist") %>% 
+  dplyr::select(Order_, FamilyName, ScientificName, RL_Category, Synonyms) %>% 
+  dplyr::rename("Order" = "Order_") %>%
+  mutate(Order = stringr::str_to_sentence(Order))
+Tax[Tax == "<NA>"] = NA
+
+# Atlas species names
+spData <- read.csv("../../Data/csv/SpeciesNamesData.csv") %>% pull(verbatim_name) 
+
+```
+
+### Create Taxon Lookup table with synonyms from BOTW Taxonomic Info
+
+```{r}
+# Reduce Taxonomic data from BirdLife 2018 to Species Names columns
+Tax_red <- Tax %>%
+    distinct(ScientificName, Synonyms) %>%
+    dplyr::rename("AtlasSp" = "ScientificName")
+Tax_red$TaxID <- seq(1:nrow(Tax_red))
+head(Tax_red)
+
+# Quick Matches
+sp_direct_match <- intersect(spData, Tax_red$AtlasSp) # 733
+sp_syn_match <- intersect(spData, Tax_red$Synonyms) # 72
+
+# Create Dataframe that will be filled for taxonomic matching
+Atlas_sp <- data.frame(
+    AtlasSp = spData,
+    AtlasID = seq(1:length(spData)),
+    match_type = NA,
+    match = NA
+) %>%
+    group_by(AtlasSp) %>%
+    mutate(
+        match_type = case_when(
+            AtlasSp %in% sp_direct_match ~ "direct",
+            AtlasSp %in% sp_syn_match ~ "synonym",
+            .default = NA
+        )
+    )
+
+# =================================== Step 1: Direct Matches  ===================================== #
+
+Atlas_merged <- left_join(Atlas_sp, Tax_red %>% filter(AtlasSp %in% sp_direct_match)) %>%
+    group_by(AtlasSp) %>%
+    mutate(
+        match = case_when(is.na(TaxID) ~ 0, !is.na(TaxID) ~ 1),
+        AtlasSp_new = case_when(match == 1 ~ AtlasSp, match == 0 ~ ""),
+        ScientificName = case_when(match == 0 ~ NA, match == 1 ~ AtlasSp)
+    )
+
+Atlas_merged %>% filter(AtlasSp_new == "") %>% ungroup() %>% distinct(match_type)
+
+Atlas_merged %>%
+    filter(match == 1) %>%
+    n_distinct() # 733 species with matching taxonomy. We can delete them from the matching process now
+
+# Checks:
+spData_unmmatched <- Atlas_merged %>%
+    filter(match == 0) %>%
+    pull(AtlasSp) # 108 species still missing
+sp_matched <- Atlas_merged %>%
+    filter(match == 1) %>%
+    pull(AtlasSp)
+
+syn_match <- intersect(spData_unmmatched, sp_syn_match) # of those 108, 67 species can be matched directly from the synonyms species
+
+intersect(sp_syn_match, sp_matched) # 5 Species were matched but are also found in the synonyms column.
+
+Atlas_merged %>% filter(AtlasSp %in% intersect(sp_syn_match, sp_matched))
+
+
+# =================================== Step 2: Direct Synonyms =========================================== #
+Atlas_synonyms <- Atlas_merged %>%
+    dplyr::select(AtlasID, AtlasSp, match_type, match) %>%
+    filter(AtlasSp %in% syn_match)
+Atlas_synonyms$Synonyms <- Atlas_synonyms$AtlasSp
+
+Atlas_synonyms_merged <- left_join(Atlas_synonyms, Tax_red %>% filter(Synonyms %in% syn_match) %>% rename("ScientificName" = "AtlasSp")) %>%
+    mutate(
+        AtlasSp_new = ScientificName,
+        match = 1
+    )
+head(Atlas_synonyms_merged)
+head(Atlas_merged)
+colSums(is.na(Atlas_synonyms_merged))
+Atlas_synonyms_merged %>% filter(ScientificName == "")
+
+Atlas_merged2 <- rbind(Atlas_merged %>% filter(!(AtlasSp %in% syn_match)), Atlas_synonyms_merged)
+
+# Delete species from vector that have been matched already:
+spData_unmmatched2 <- Atlas_merged2 %>%
+    filter(is.na(TaxID)) %>%
+    pull(AtlasSp)
+Atlas_merged3 <- Atlas_merged2 %>%
+    group_by(AtlasSp) %>%
+    mutate(
+        match_type =
+            case_when(
+                (AtlasSp %in% spData_unmmatched2) ~ "manually",
+                .default = match_type
+            )
+    )
+
+## Note: There is a script that can do a partial match on the concatenated strings in the original Synonyms column. Not needed here, but just in case.
+
+# =================================== Step 3: Manual Matching  =========================================== #
+# Lets continue with manual matching of names: (Note: Updated names were retrieved from Wikipedia on 21.04.2024)
+unmatched <- Atlas_merged3 %>% filter(match_type == "manually")
+unmatched$AtlasSp_new <- gsub("Sylvia", "Curruca", unmatched$AtlasSp)
+unmatched$AtlasSp_new <- gsub("Carduelis cannabina", "Linaria cannabina", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Carduelis chloris", "Chloris chloris", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Linaria chloris", "Chloris chloris", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Locustella pryeri", "Helopsaltes pryeri", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Cyanecula svecica", "Luscinia svecica", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Passer rutilans", "Passer cinnamomeus", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Luscinia akahige", "Larvivora akahige", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Gallirallus okinawae", "Hypotaenidia okinawae", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Luscinia komadori", "Larvivora komadori", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Hirundo daurica", "Cecropis daurica", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Poecile varius", "Sittiparus varius", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Sterna albifrons", "Sternula albifrons", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Egretta intermedia", "Ardea intermedia", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Ammodramus maritimus", "Ammospiza maritima", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Falcipennis canadensis", "Canachites canadensis", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Regulus calendula", "Corthylio calendula", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Oporornis formosus", "Geothlypis formosa", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Bonasa bonasia", "Tetrastes bonasia", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Regulus ignicapillus", "Regulus ignicapilla", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Parus caeruleus", "Cyanistes caeruleus", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Miliaria calandra", "Emberiza calandra", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Delichon urbica", "Delichon urbicum", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Oporornis philadelphia", "Geothlypis philadelphia", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Seiurus noveboracensis", "Parkesia noveboracensis", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Coccothraustes vespertinus", "Hesperiphona vespertina", unmatched$AtlasSp_new)
+unmatched$AtlasSp_new <- gsub("Hydropogne caspia", "Hydroprogne caspia", unmatched$AtlasSp_new)
+
+## Back to Step 1: Direct match:
+unmatched$ScientificName <- unmatched$AtlasSp_new
+unmatched$TaxID <- NULL
+unmatched$Synonyms <- NULL
+
+setdiff(unmatched$ScientificName, Tax_red$AtlasSp) # Matched all but 2 species which are new. Great !
+unmatched_merged <- left_join(unmatched, Tax_red %>% rename("ScientificName" = "AtlasSp"))
+unmatched_merged$match <- 1
+
+## Merge to final table: 
+Atlas_merged4 <- rbind(Atlas_merged3 %>% filter(match_type != "manually"), unmatched_merged) %>%
+  group_by(AtlasSp) %>%
+  mutate()
+ Atlas_merged4 %>% filter(match_type == "manually")
+
+## Data Checks: 
+colSums(is.na(Atlas_merged4))
+intersect(spData, Atlas_merged4$AtlasSp)
+unique(Atlas_merged4$ScientificName)
+intersect(Atlas_merged4$ScientificName, Tax_red$AtlasSp)
+dups <- Atlas_merged4$ScientificName[duplicated(Atlas_merged4$ScientificName)] # 30 duplicates
+name_vector <- Atlas_merged4 %>% pull(ScientificName)
+Tax_LookUp <- Atlas_merged4 %>% distinct(AtlasSp, ScientificName)
+unique(Tax_LookUp$ScientificName)
+
+## Save Output:
+Atlas_merged4 %>% 
+  filter(ScientificName %in% dups) %>% 
+  write.csv("../../Documentation/A_3d_SynonymsAtlasData.csv")
+
+Atlas_merged4 %>%
+  write.csv("../../Data/csv/A_3d_full_BirdLife2018_TaxonomicLookup.csv")
+  
+```
+
+### Get RL Status from BirdLife (tbh this is unneccessary)
+```{r}
+RedListCat <- Tax %>% 
+  filter(ScientificName %in% Tax_LookUp$ScientificName) %>% 
+  dplyr::select(ScientificName, RL_Category) %>% 
+  left_join(Tax_LookUp) %>% 
+  dplyr::select(-ScientificName)
+
+unique(RedListCat$AtlasSp) %>% length()
+colSums(is.na(RedListCat))
+saveRDS(RedListCat, paste0(out_path, "Predictors/A_3d_RedListCatBL.rds"))
+
+
+```
+
+### Rasterize BirdLife rangemaps
+```{r}
+#| label: filter-BirdLife-SQL
+#| eval: false
+
+# Create a SQL query to filter the sci_name column and apply additional filters
+
+name_vector_sql <- paste0("'", paste(name_vector, collapse = "','"), "'")
+
+sql_query <- paste0(
+  "SELECT sci_name, presence, origin, seasonal, Shape_Length, Shape_Area, Shape ",
+  "FROM All_Species ",
+  "WHERE sci_name IN (", name_vector_sql, ") ",
+  "AND seasonal IN (1, 2) ", # Resident & Breeding Season (not non-breeding or passage)
+  "AND origin IN (1, 2) ",   # Native or reintroduced (not introduced or vagrant)
+  "AND presence IN (1, 2, 3)" # Extant, probably extant, possibly extant (not possibly extinct or extinct)
+)
+
+tictoc::tic()
+# Read the filtered data from the geodatabase
+All_sp_2 <- suppressMessages(st_read(fgdb, query = sql_query))
+tictoc::toc() # takes about 30 minutes
+
+# Save Reduced Version as Shapefile (takes a while)
+st_write(All_sp_2, "../../Data/shp/A_3d_BirdLife_810sp.shp", append=F)
+```
+
+```{r}
+#| label: Rasterize-BirdLife-ranges
+#| eval: false
+
+
+tictoc::tic()
+r_birds <- rasterizeRange(dsn= "../../Data/shp/A_3d_BirdLife_810sp.shp",
+                          id="sci_nam", touches=TRUE, save = TRUE, resolution = 1,
+                          path = "../../Data/species_rasters/")
+tictoc::toc() ## Takes about 18 minutes on my local machine
+
+```
+
+### Calculate Global Range Size
+
+::: {.callout-note appearance="minimal"}
+## Quote from st_area() function:
+
+if 'sf_use_s2()' is 'FALSE', ellipsoidal distances are computed using st_geod_distance which uses function 'geod_inverse' from GeographicLib (part of PROJ); see Karney, Charles FF, 2013, Algorithms for geodesics, Journal of Geodesy 87(1), 43-55
+:::
+
+```{r}
+#| eval: false
+
+
+tictoc::tic()
+## Requires BirdLife object from above
+# Calculate global range size for each species ## Takes about 11:07 - 
+sp <- unique(BirdLife$sci_name)
+RangeSizeList <- list()
+for (s in seq_along(sp)){
+  temp <- BirdLife %>% 
+    filter(sci_name == sp[s]) %>% 
+    dplyr::select(sci_name)
+  
+  temp$GlobRangeSize_m2 <- as.numeric(st_area(temp))
+  temp$GlobRangeSize_km2 <- temp$GlobRangeSize_m2/1000
+  temp2 <- temp %>% st_drop_geometry()
+  temp2 <- temp2 %>% 
+    group_by(sci_name) %>% 
+    mutate(
+      GlobRangeSize_m2 = case_when(
+        nrow(temp2) > 1 ~ sum(GlobRangeSize_m2),
+        nrow(temp) == 1 ~ GlobRangeSize_m2),
+      GlobRangeSize_km2 = case_when(
+        nrow(temp2) > 1 ~ sum(GlobRangeSize_km2),
+        nrow(temp) == 1 ~ GlobRangeSize_km2))
+  
+  RangeSizeList[[s]] <- temp2[1,]
+  
+}
+
+RangeSizeBOTW <- plyr::rbind.fill(RangeSizeList) %>% 
+  rename("ScientificName" = "sci_name") %>% 
+  left_join(Tax_LookUp) %>% 
+  select(-ScientificName)
+
+RangeSizeBOTW$GlobRangeSize_km2 <- as.numeric(RangeSizeBOTW$GlobRangeSize_km2 )
+
+head(RangeSizeBOTW)
+unique(RangeSizeBOTW$AtlasSp) %>% length()
+colSums(is.na(RangeSizeBOTW))
+
+
+saveRDS(RangeSizeBOTW, paste0(out_path, "Predictors/A_3d_RangeSizeBOTW_df.rds"))
+
+tictoc::toc()
+```
+
+```{r}
+## Read bird shapefiles back in ===========================================================
+sp_v <- stringr::str_split_i(list.files("../../Data/species_rasters/"), 
+                           pattern = ".tif", 1)
+sp_v <- gsub("_1", "", sp_v) # remove 1 (1 degree resolution)
+sp_v <- gsub("_", " ", sp_v)
+
+r_birds <- rast(paste0("../../Data/species_rasters/", 
+                       list.files("../../Data/species_rasters/", 
+                                  pattern =".tif")))
+names(r_birds) <- sp_v
+```
+
+## Climate Data
+
+### Aggregate CHELSA to 1° resolution
+
+```{r}
+#| eval: false
+
+tictoc::tic()
+# read shapefiles:
+climate_stack <- rast(paste0(CHELSA_path, tif_files))
+
+## Aggregate to 1 degree cells
+target_resolution <- c(120)  # Factor 120 to get from  0.008333° to 1° (110km)
+# Aggregate the raster stack to the target resolution
+climate_stack_agg <- aggregate(climate_stack, ## This takes ca. 5 minutes on my local machine
+                               fact = target_resolution, 
+                               fun = mean,
+                               na.rm=T)
+saveRDS(climate_stack_agg, "../../Data/rds/A_3d_ClimateStack.rds")
+tictoc::toc()
+```
+
+## Extract Bird Coordinates
+
+```{r}
+
+climate_stack_agg <- readRDS("../../Data/rds/A_3d_ClimateStack.rds")
+
+names(climate_stack_agg) <- c("MAT", 
+                              "AnnualPrec", 
+                              "PrecWettestMonth", 
+                              "PrecDriestMonth", 
+                              "PrecSeas", 
+                              "MeanDiurnalTempRange", 
+                              "Isotherm", 
+                              "TempSeas", 
+                              "MeanDailyTempWarmestMonth", 
+                              "MeanDailyTempColdestMonth", 
+                              "AnnualTempRange")
+
+# Extract species coordinates ===========================================================
+
+try({
+coords_sp <- list()
+for(i in seq_along(sp_v)){
+  r_b <- r_birds[[i]]
+
+  # Match resolution, extent, and projection of climate raster to species raster
+  r_b_matched <- project(r_b, climate_stack_agg,  method = "average")
+  
+  r_b2 <- as.data.frame(r_b_matched, xy=T)
+  r_b2$species <- sp_v[i]
+  r_b3 <- r_b2 %>% rename("Presence" = sp_v[i])
+  coords_sp[[i]] <- r_b3
+}
+})
+
+coords_df <- do.call(rbind,coords_sp)
+```
+
+## Climate PCA
+
+```{r}
+# Run PCA to build climate space
+pca_res <- prcomp(climate_stack_agg, scale. = T)
+summary(pca_res)
+
+# extract loadings from PCA for documentation
+pca_res$rotation %>% 
+  write.csv("../../Documentation/PCA_loadings_climNiche.csv")
+
+```
+
+# Project Birds to climmate space
+
+```{r}
+# Loop through species to extract climate values  ======================================
+sp_v <- unique(coords_df$species)
+clim_vals_list <- list()
+pca_all <- list()
+for (i in seq_along(sp_v)){
+  
+  sp <- coords_df %>% filter(species == sp_v[i]) %>% dplyr::select(-species, -Presence)
+  clim_vals <- extract(climate_stack_agg, sp, xy=T, df=T) %>% data.frame()
+  clim_vals$species = sp_v[i]
+  clim_vals_list[[i]] <- clim_vals
+  
+  # PCA predictions:  ===========================================================
+  sp_pca <- predict(pca_res, clim_vals[,2:14])[,1:2] %>% data.frame() %>% mutate(species = sp_v[i])
+
+  pca_all[[i]] <- sp_pca
+  
+}
+
+clim_vals_all <- do.call(rbind, clim_vals_list) 
+colSums(is.na(clim_vals_all))
+
+saveRDS(pca_all, "../../Data/rds/A_3d_pca_all.rds") 
+
+```
+
+## Plot Birds in Climate Space
+
+```{r}
+# Plot Climate Space for a couple of species # 
+# Step 1: Extract the percentage of variance explained
+pca_var <- summary(pca_res)$importance[2, ] * 100
+
+# Step 2: Format the axis labels
+x_label <- paste0("PC1 (", round(pca_var[1], 2), "%)")
+y_label <- paste0("PC2 (", round(pca_var[2], 2), "%)")
+
+# Step 3: Update the ggplot2 code
+library(ggplot2)
+library(ggfortify)
+
+ggplot() +
+  geom_point(aes(x = PC1, y = PC2), col = "black", data = pca_res) +
+  geom_point(aes(x = PC1, y = PC2), col = "#fde725", alpha = 0.6, data = pca_all[[1]]) +
+  geom_point(aes(x = PC1, y = PC2), col = "#5ec962", alpha = 0.4, data = pca_all[[2]]) +
+  geom_point(aes(x = PC1, y = PC2), col = "#21918c", alpha = 0.3, data = pca_all[[3]]) +
+  geom_point(aes(x = PC1, y = PC2), col = "#3b528b", alpha = 0.2, data = pca_all[[4]]) +
+  geom_point(aes(x = PC1, y = PC2), col = "#440154", alpha = 0.3, data = pca_all[[5]]) +
+  labs(x = x_label, y = y_label) +
+  common_theme
+
+ggsave(paste0(out_path, "Figures/BirdsClimateSpace.pdf"))
+```
+
+# Calculate Niche Breadth
+
+```{r}
+pca_all <-  readRDS("../../Data/rds/A_3d_pca_all.rds") # Predicted values in PCA for species
+
+all_niches <- list()
+# Calculate niche breadth
+for (i in seq_along(pca_all)){
+  niche_breadth2 <- apply(pca_all[[i]][,1:2], 2, sd, na.rm=T) 
+  # Create a data frame with species and corresponding variance and standard deviation
+  niche_breadth <- data.frame(
+    species = unique(pca_all[[i]]$species),
+    sd_PC1 = niche_breadth2[1],
+    sd_PC2 = niche_breadth2[2])
+  all_niches[[i]] <- niche_breadth
+}
+
+Niches_df <- plyr::rbind.fill(all_niches)[,1:3] %>% 
+rename("ScientificName" = "species") %>% 
+mutate(ScientificName = case_when(
+  ScientificName == "Mo" ~ "Montifringilla nivalis",
+  ScientificName == "Fringilla mo" ~ "Fringilla montifringilla",
+  .default = ScientificName)) %>% 
+left_join(Tax_LookUp) %>% 
+group_by(ScientificName) 
+
+saveRDS(Niches_df, paste0(out_path, "rds/A_3d_Niches_df.rds"))
+
+colSums(is.na(Niches_df))
+head(Niches_df)
+
+
+RangeSizeBOTW <- readRDS(paste0(out_path, "Predictors/A_3d_RangeSizeBOTW_df.rds"))
+BirdLife_Predictors <- Niches_df %>% ungroup() %>% select(-ScientificName) %>%
+    left_join(RangeSizeBOTW) %>%
+    left_join(RedListCat) %>%
+    distinct(AtlasSp, .keep_all =T) %>% rename("verbatim_name" = "AtlasSp")
+
+# Data Check: 
+BirdLife_Predictors %>% distinct(verbatim_name) %>% nrow()
+colSums(is.na(BirdLife_Predictors))
+
+
+saveRDS(BirdLife_Predictors, paste0(out_path, "Predictors/A_3d_BirdLife2018_Predictors.rds"))
+
+```
+
+## Plot Niche Breadth
+
+```{r}
+ggplot(data = Niches_df, aes(x = sd_PC1, y = sd_PC2))+
+  geom_point(data = Niches_df, aes(x = sd_PC1, y = sd_PC2, col = AtlasSp), show.legend = F) +
+  geom_smooth(method = "lm")+
+  common_theme
+```
+```{r}
+save.image(paste0(out_path, "RData/A_3d_ClimateNicheBreadth.RData"))
+
+```
+

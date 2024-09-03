@@ -1,0 +1,209 @@
+---
+title: "Atlas Variables Calculations"
+date: "2024-04-20"
+output:
+  html_document:
+    code_folding: hide
+format:
+  html:
+    toc: true
+    number-sections: true
+    colorlinks: true
+---
+
+# Setting up the Environmment
+
+## Setting up Environment
+
+```{r}
+#| message: false
+#| warning: false
+#| label: 0_clean_env
+
+rm(list=ls())
+gc()
+
+source("../src/A_config.R") # configurations / data paths / variables / plotting settings / libraries
+source("../src/functions.R") # processing functions
+
+load(paste0(out_path, "RData/A_01_Atlas_Data_clean.RData"))
+ls()
+```
+
+## Calculate Total Atlas Area and Sampled Atlas Area.
+```{r}
+
+
+grid_info <- vector("list", 4)
+
+for (i in seq_along(grid_list)){
+  for(j in seq_along(grid_list[[i]])){
+    grid_info[[i]][[j]] <- calculate_grid_info(grid_list[[i]][[j]])
+    grid_info[[i]][[j]]$dataset <- atlas_names[i]
+    grid_info[[i]][[j]]$cell_grouping <-as.factor(levels(desired_levels)[j])
+  
+    }
+  }
+atlas_areas <- do.call(rbind, unlist(grid_info, recursive = F))
+
+
+pres_dat_final <- presence_data_filt %>% 
+  left_join(atlas_areas) %>%
+  dplyr::mutate(
+    cell_grouping = factor(cell_grouping, levels = desired_levels),
+    grain = case_when(
+      dataset == atlas_names[1] ~ "10",
+      dataset == atlas_names[2] ~ "5",
+      dataset == atlas_names[3] ~ "20",
+      dataset == atlas_names[4] ~ "50"
+    )
+  ) %>%
+  filter(!is.na(verbatim_name))
+
+
+rm(i,j, grid_info)
+```
+
+
+
+```{r}
+# Calculate Jaccard
+Jac_list_all <-  vector("list", length = 4)
+for (a in seq_along(atlas_names)){
+  
+  dd <- pres_dat_final %>% filter(dataset == atlas_names[a])
+  grains <- unique(dd$cell_grouping)
+  sp_list <- unique(dd$verbatim_name)
+  Jac_list_layer <- vector("list", length = length(grains))
+  
+  for(layer in seq_along(grains)){
+    
+    dd_grain <- dd %>% filter(cell_grouping == grains[layer])
+    
+    for (sp in seq_along(sp_list)){
+      
+      dd_sp <- dd_grain %>% filter(verbatim_name == sp_list[sp])
+      
+      
+    
+      cells_1 <- dd_sp %>% filter(tp == 1) %>% pull(cell_label)
+      cells_2 <- dd_sp %>% filter(tp == 2) %>% pull(cell_label)
+    
+
+      
+      Jc_df <- data.frame(Jaccard = jaccard(cells_1, cells_2),
+               verbatim_name = sp_list[sp],
+               cell_grouping = grains[layer],
+               dataset = atlas_names[a])
+      
+      Jac_list_layer[[layer]][[sp]] <- Jc_df
+    
+    }
+    
+    Jac_list_all[[a]][[layer]] <- do.call(rbind, Jac_list_layer[[layer]])
+  
+  }
+  
+  }
+
+Jaccard_df <- do.call(rbind, unlist(Jac_list_all, recursive = F))
+Jaccard_df$cell_grouping <- as.factor(Jaccard_df$cell_grouping)
+Jaccard_df$dataset <- as.factor(Jaccard_df$dataset)
+
+summary(Jaccard_df)
+
+pres_dat_final <- pres_dat_final %>% left_join(Jaccard_df)
+
+# Clean up unnecessary objects
+rm(presence_data_filt, a, cells_1, cells_2, dd, dd_grain, dd_sp, sp, layer, Jc_df, sp_list, Jac_list_layer, Jac_list_all)
+
+```
+
+
+### 1.2 Calculate Occupancy 
+```{r}
+occ_data_final <- calculate_occupancy(pres_dat_final, atlas_names)
+
+species_data <- occ_data_final %>%
+    dplyr::select(
+      dataset, tp, cell_grouping, verbatim_name,
+      mean_area, Total_area, Total_area_samp, Total_Ncells, Total_Ncells_samp,
+      AOO, occ_Ncells, rel_occ_Ncells, rel_AOO, Jaccard) %>%
+    distinct(dataset, tp, cell_grouping, verbatim_name, .keep_all = TRUE)
+
+
+### =============================================== ###
+#rm(pres_dat_final)
+### =============================================== ###
+
+```
+
+## 2. Occupancy-Area-Relationship (OAR)
+### 2.1 Mark saturated scales 
+- code dummy column "exclude" to exclude species with < 2 scales not saturated (i.e, if less than two scales are available for OAR calculation)
+- Saturation: rel_AOO = 1
+
+```{r}
+
+species_data_new <- process_and_calculate_OAR(species_data, atlas_names, time_periods)
+```
+
+
+
+## 4. Log Ratio of Change in Occupancy
+### 4.1 Long to wide format
+
+```{r}
+
+wide_dfs <- list()
+for (i in seq_along(time_periods)){
+
+    wide_dfs[[i]] <- species_data_new %>%
+        filter(cell_grouping == 1) %>% 
+        distinct(dataset, tp, verbatim_name, AOO) %>%
+        group_by(dataset, tp, verbatim_name) %>%
+        filter(tp == time_periods[i]) %>%
+        setNames(paste0('tp', i, '_', names(.))) %>% 
+        ungroup() %>%
+        select(-c(paste0("tp", i, "_tp"))) %>%
+        dplyr::rename(
+            verbatim_name = paste0("tp", i, "_verbatim_name"),
+            dataset = paste0("tp", i, "_dataset"))
+       }
+
+sp_dat_wide <- merge(wide_dfs[[1]], wide_dfs[[2]])
+colSums(is.na(sp_dat_wide))
+
+### =============================================== ###
+rm(wide_dfs, i)
+### =============================================== ###
+```
+
+## 4.2 Calculate Log Ratio of Occupancy Change
+
+```{r}
+# Calculate log-Ratio of AOO (Temporal change)
+logRatio <- sp_dat_wide %>% 
+  mutate(log_R2_1 = log(tp2_AOO/tp1_AOO)) %>%
+  select(-tp1_AOO, -tp2_AOO)
+
+big_table <- full_join(species_data_new, logRatio) %>% filter(cell_grouping == 1) %>%
+    distinct(dataset, tp, cell_grouping, verbatim_name, .keep_all=T) %>%
+    mutate_if(is.numeric, round, 3)
+
+
+big_table %>% group_by(dataset, tp) %>% 
+  dplyr::summarise(across(everything(), ~ sum(is.na(.x))))
+
+### =============================================== ###
+rm(logRatio,sp_dat_wide)
+### =============================================== ###
+
+```
+# Save Output:
+```{r}
+saveRDS(occ_data_final, paste0(out_path, "rds/A_02_SpeciesDatPerCell.rds")) # data per cell
+saveRDS(big_table, paste0(out_path, "Predictors/A_02_BigTable.rds")) # data per species
+save.image(paste0(out_path, "RData/A_02_Atlas_Var_Calc.RData"))
+
+```

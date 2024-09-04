@@ -11,7 +11,7 @@ home_path <- "c:/Users/wolke/OneDrive - CZU v Praze/"
 
 ## Folders
 source_Git <- c(paste0(home_path, 
-                       "Dokumenty/GitHub/StaticPredictors_Woelke_et_al_2024/"))
+                       "Dokumenty/GitHub/StaticPredictors_XXX_et_al_2024/"))
 
 ## Folder path to output folder
 out_path <- c(paste0(source_Git, "Results/"))

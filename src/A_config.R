@@ -31,7 +31,7 @@ source_atlas <- c(paste0(home_path,
 source_predictors <- c(paste0(home_path, 
                               "Dokumenty/PhD_Projects/StaticPredictors/Data/"))
 source_Git <- c(paste0(home_path, 
-                       "Dokumenty/GitHub/StaticPredictors_Woelke_et_al_2024/"))
+                       "Dokumenty/GitHub/StaticPredictors_XXXX_et_al_2024/"))
 
 ## Folder paths to atlas data
 source_paths <- c(paste0(source_atlas, "Birds_Atlas_Czechia/"), 
